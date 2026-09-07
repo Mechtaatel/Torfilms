@@ -77,10 +77,25 @@ const field = name => form.elements.namedItem(name)
 function addSource (source = {}) {
   if ($('#sources').children.length >= 200) return
   const row = node('fieldset'); row.source = source; row.append(node('legend', 'Версия фильма'))
+  if (source.episodes?.length) {
+    const list = node('details'), summary = node('summary')
+    const updateCount = () => { summary.textContent = `Серии: ${row.source.episodes.filter(e => !e.excluded).length} из ${row.source.episodes.length}` }
+    row.source = { ...source, episodes: source.episodes.map(e => ({ ...e })) }
+    updateCount(); list.append(summary)
+    for (const episode of row.source.episodes) {
+      const label = node('label', episode.filename || `Файл ${episode.index}`), title = node('input'), include = node('input'), enabled = node('label', 'Показывать в списке серий')
+      title.value = episode.title; title.maxLength = 200; title.oninput = () => { episode.title = title.value }
+      include.type = 'checkbox'; include.checked = !episode.excluded
+      include.onchange = () => { episode.excluded = !include.checked; updateCount() }
+      label.append(title); enabled.append(include); list.append(label, enabled)
+    }
+    row.append(list)
+  }
   for (const [name, title, value] of [['label', 'Качество / версия', source.label], ['season', 'Номер сезона (для сериалов)', source.season ?? 1], ['magnet', 'Magnet-ссылка', source.magnet], ['fileIndex', 'Начальный индекс видео (серии доступны в плеере)', source.fileIndex ?? 0]]) { const label = node('label', title), input = node('input'); input.dataset.field = name; input.value = value ?? ''; input.type = ['fileIndex', 'season'].includes(name) ? 'number' : 'text'; if (input.type === 'number') { input.min = '0'; input.step = '1' } if (name === 'label') input.required = true; label.append(input); row.append(label) }
   const upload = node('input'); upload.type = 'file'; upload.accept = '.torrent'; upload.dataset.field = 'torrent'
   const label = node('label', source.hasTorrent || source.torrentBase64 ? '.torrent сохранён. Выберите файл, чтобы заменить.' : 'Или .torrent-файл (до 3 МБ)'); label.append(upload)
-  row.querySelector('[data-field=magnet]').oninput = () => { row.source = { ...row.source, hasTorrent: false, torrentBase64: '' } }
+  row.querySelector('[data-field=magnet]').oninput = () => { row.source = { ...row.source, episodes: [], hasTorrent: false, torrentBase64: '' }; row.querySelector('details')?.remove() }
+  upload.onchange = () => { row.source = { ...row.source, episodes: [] }; row.querySelector('details')?.remove() }
   const remove = node('button', 'Убрать качество'); remove.type = 'button'; remove.onclick = () => row.remove(); row.append(label, remove); $('#sources').append(row)
 }
 function addSeason (season = {}) {

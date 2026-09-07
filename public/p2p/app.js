@@ -3,6 +3,7 @@ import WebTorrent from './webtorrent.min.js'
 import { videoFiles } from './catalog-model.js'
 import { createPieceFallback } from './piece-fallback.js'
 import { ramLimitBytes } from './ram-limits.js'
+import { streamMediaSource } from './media-source-player.js'
 export function mountPlayer (root, { movie: initialMovie, quality: initialQuality, compact = false } = {}) {
 const $ = s => root.querySelector(s)
 const updateRamLabel = () => { if ($('#ram-value')) $('#ram-value').textContent = `${$('#ram').value} МБ` }
@@ -16,6 +17,7 @@ let catalogueSelection = null
 let joinQueue = Promise.resolve(), joinRequest = 0, catalogueRequest = 0, joining = false
 let selectedFile = null, audioMedia = null, audioOffset = 0, audioActive = false, audioRequest = 0, audioTimer
 let trackScan = 0, trackRetry
+let mediaStream = null
 let timelineDragging = false, timelineTarget = null
 const clockText = seconds => {
   const n = Math.max(0, Math.floor(seconds || 0))
@@ -37,6 +39,7 @@ async function mediaJson (route) {
   return data
 }
 async function chooseFile (file, value) {
+  mediaStream?.destroy(); mediaStream = null
   ++audioRequest; ++trackScan; clearTimeout(trackRetry)
   clearTimeout(audioTimer)
   selectedFile = file; audioMedia = null; audioActive = false; audioOffset = 0
@@ -108,10 +111,14 @@ async function applyAudio (position, resume) {
     const plan = await mediaJson(`/bridge/audio-plan/${base}?start=${position}`)
     if (request !== audioRequest) return
     video.pause()
-    audioOffset = plan.origin; audioActive = true
-    video.src = `/bridge/audio/${base}?track=${track.index}&copy=${copy ? 1 : 0}&start=${position}${track.external ? `&audioFile=${track.fileIndex}` : ''}`
-    video.load()
-    let positioned = plan.localTime === 0
+    mediaStream?.destroy(); mediaStream = null
+    const url = `/bridge/audio/${base}?track=${track.index}&copy=${copy ? 1 : 0}&start=${position}${track.external ? `&audioFile=${track.fileIndex}` : ''}`
+    mediaStream = streamMediaSource(video, { url, duration: audioMedia.duration, origin: plan.origin, position, audioCodec: copy ? ({ aac: 'mp4a.40.2', mp3: 'mp4a.6B', opus: 'opus', flac: 'fLaC' }[track.codec]) : 'mp4a.40.2',
+      onSeek: time => applyAudio(time), onError: error => { if (request === audioRequest) $('#audio-mode').textContent = error.message }
+    })
+    audioOffset = mediaStream ? 0 : plan.origin; audioActive = true
+    if (!mediaStream) { video.src = url; video.load() }
+    let positioned = !!mediaStream || plan.localTime === 0
     const wait = () => {
       if (request !== audioRequest) return
       if (video.error) { $('#audio-mode').textContent = `Не удалось запустить выбранную озвучку: ${video.error.message || video.error.code}`; return }
@@ -130,7 +137,7 @@ async function applyAudio (position, resume) {
   } catch (e) { if (request === audioRequest) { timelineTarget = null; renderTimeline(); $('#audio-mode').textContent = `Озвучка не применена: ${e.message}. Исходный поток не изменён.`; status(e.message) } }
 }
 $('#audio-track').onchange = () => applyAudio()
-$('#audio-original').onclick = () => { ++audioRequest; clearTimeout(audioTimer); audioActive = false; audioOffset = 0; selectedFile?.streamTo($('video')); $('#audio-mode').textContent = 'Исходный P2P-поток с начала. Кодеки не изменяются.' }
+$('#audio-original').onclick = () => { mediaStream?.destroy(); mediaStream = null; ++audioRequest; clearTimeout(audioTimer); audioActive = false; audioOffset = 0; selectedFile?.streamTo($('video')); $('#audio-mode').textContent = 'Исходный P2P-поток с начала. Кодеки не изменяются.' }
 $('#audio-seek').oninput = () => { timelineDragging = true; renderTimeline() }
 $('#audio-seek').onchange = () => {
   const target = Number($('#audio-seek').value)
@@ -151,6 +158,7 @@ const trackers = ['wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xy
 const status = text => { if (!disposed) $('#status').textContent = text }
 $('video').addEventListener('playing', () => status('Воспроизведение'))
 async function stop () {
+  mediaStream?.destroy(); mediaStream = null
   ++trackScan; clearTimeout(trackRetry)
   ++audioRequest; clearTimeout(audioTimer); audioMedia = null; selectedFile = null; $('#audio-panel').hidden = true
   generation++
@@ -192,16 +200,17 @@ function ready (value, limit) {
     installReader(file, value, limit, bridge ? (first, last) => {
       bridgePost('demand', { infoHash: value.infoHash, first, last, viewer }).catch(e => { if (value === torrent && $('video').readyState < 2) status(e.message) })
     } : null, fallback)
-    if (!/\.(mp4|webm|m4v|ogg|ogv|mkv)$/i.test(file.name)) continue
+    const entry = videoFiles(value.files, catalogueSelection?.episodes).find(e => e.file === file)
+    if (!entry) continue
     const button = document.createElement('button')
-    button.textContent = file.name
+    button.textContent = entry.title
     button.onclick = () => chooseFile(file, value)
     $('#files').append(button)
   }
   const episodes = $('#episode')
   if (episodes) {
     episodes.replaceChildren()
-    for (const { file, index } of videoFiles(value.files)) { const option = document.createElement('option'); option.value = String(index); option.textContent = file.name; episodes.append(option) }
+    for (const { title, index } of videoFiles(value.files, catalogueSelection?.episodes)) { const option = document.createElement('option'); option.value = String(index); option.textContent = title; episodes.append(option) }
     episodes.disabled = !episodes.options.length
     episodes.onchange = () => chooseFile(value.files[Number(episodes.value)], value)
   }
@@ -237,7 +246,7 @@ async function connect (source, selection, request) {
       if (id !== generation || request !== joinRequest) return
       ready(value, limit)
       if (selection) {
-        const videos = videoFiles(value.files)
+        const videos = videoFiles(value.files, selection.episodes)
         const chosen = videos.find(f => f.index === selection.fileIndex) || videos[0]
         if (chosen) chooseFile(chosen.file, value)
         else status('В раздаче не найдено видео. Выберите другую раздачу.')

@@ -42,7 +42,8 @@ function select () {
   }
 }
 const timer = setInterval(select, 3000)
-const media = bridgeMedia(() => torrent, () => `http://${host}:${server.address().port}`, mediaMetadata(path.join(process.env.TORFILMS_CATALOG_DIR || fileURLToPath(new URL('./data/', import.meta.url)), 'media-metadata')))
+const metadataStore = mediaMetadata(path.join(process.env.TORFILMS_CATALOG_DIR || fileURLToPath(new URL('./data/', import.meta.url)), 'media-metadata'))
+const media = bridgeMedia(() => torrent, () => `http://${host}:${server.address().port}`, metadataStore)
 const server = http.createServer(async (req, res) => {
   const json = (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)) }
   try {
@@ -92,6 +93,7 @@ const server = http.createServer(async (req, res) => {
           torrent.on('warning', e => { warning = e.message })
           torrent.on('error', e => { warning = e.message })
           torrent.on('ready', select)
+          torrent.on('ready', () => metadataStore.files(torrent.infoHash, torrent.files).catch(e => { warning = `Metadata: ${e.message}` }))
         }
         return json(200, { ok: true })
       }

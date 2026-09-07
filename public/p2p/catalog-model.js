@@ -13,6 +13,7 @@ export function seasonsOf (movie) {
 export function sourcesFor (movie, season) {
   return season == null ? movie.sources : movie.sources.filter(s => (s.season ?? 1) === season)
 }
-export function videoFiles (files) {
-  return files.map((file, index) => ({ file, index })).filter(({ file }) => /\.(mp4|webm|m4v|ogg|ogv|mkv|mov|avi|ts|m2ts)$/i.test(file.name)).sort((a, b) => a.file.name.localeCompare(b.file.name, 'ru', { numeric: true }))
+export function videoFiles (files, overrides = []) {
+  const settings = new Map(overrides.map(e => [e.index, e]))
+  return files.map((file, index) => ({ file, index, title: settings.get(index)?.title || file.name })).filter(({ file, index }) => !settings.get(index)?.excluded && /\.(mp4|webm|m4v|ogg|ogv|mkv|mov|avi|ts|m2ts)$/i.test(file.name)).sort((a, b) => a.file.name.localeCompare(b.file.name, 'ru', { numeric: true }))
 }
