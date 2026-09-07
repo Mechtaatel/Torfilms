@@ -1,0 +1,16 @@
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = Torfilms Home
+[root]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+[server]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = IP:192.168.0.122,IP:127.0.0.1,DNS:localhost
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer

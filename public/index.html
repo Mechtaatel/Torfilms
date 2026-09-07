@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a101e">
+  <title>Torfilms · RAM streaming</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="noise"></div>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Torfilms">
+        <span class="brand-mark"><i></i><i></i><i></i></span>
+        <span>TOR<span>FILMS</span></span>
+      </a>
+      <div class="topbar-meta">
+        <span class="live-dot"></span>
+        <span id="server-status">Локальный движок готов</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow">P2P VIDEO · RAM FIRST</div>
+        <h1>Смотри поток.<br><em>Не оставляй файл.</em></h1>
+        <p class="hero-copy">Torfilms держит загруженные pieces только в памяти и запрашивает окно вокруг текущей позиции просмотра.</p>
+
+        <form id="add-form" class="add-form">
+          <div class="input-wrap">
+            <span class="input-icon">⌁</span>
+            <input id="source-input" type="text" autocomplete="off" spellcheck="false" placeholder="Вставьте magnet-ссылку или URL .torrent" required>
+          </div>
+          <button class="primary-button" type="submit"><span>Подключить</span><b>↗</b></button>
+          <label class="file-button" title="Выбрать .torrent-файл">
+            <input id="torrent-file" type="file" accept=".torrent,application/x-bittorrent">
+            <span>＋</span> .torrent
+          </label>
+        </form>
+        <div id="notice" class="notice" role="status"></div>
+      </section>
+
+      <section class="control-strip">
+        <div class="control-heading">
+          <span class="control-icon">▣</span>
+          <div>
+            <span class="control-label">Лимит RAM-кеша</span>
+            <strong id="memory-value">1 ГБ</strong>
+          </div>
+        </div>
+        <input id="memory-slider" type="range" min="128" max="16384" step="128" value="1024" title="Лимит RAM-кеша, 128 МБ — 16 ГБ">
+        <button id="apply-memory" class="ghost-button">Применить</button>
+        <div class="policy-pill"><span>●</span> Только RAM</div>
+      </section>
+
+      <section class="workspace">
+        <aside class="sessions-panel panel">
+          <div class="panel-title-row">
+            <div>
+              <span class="section-kicker">LIBRARY</span>
+              <h2>Сеансы</h2>
+            </div>
+            <span id="session-count" class="count-badge">0</span>
+          </div>
+          <div id="sessions-list" class="sessions-list">
+            <div class="empty-sessions">
+              <span class="empty-icon">◌</span>
+              <p>Здесь появятся<br>подключённые торренты</p>
+            </div>
+          </div>
+        </aside>
+
+        <section class="viewer-panel panel">
+          <div id="viewer-empty" class="viewer-empty">
+            <div class="orbit"><span>▶</span></div>
+            <span class="section-kicker">PLAYER</span>
+            <h2>Выберите видео</h2>
+            <p>Подключите torrent и выберите файл,<br>чтобы начать просмотр.</p>
+          </div>
+          <div id="viewer-content" class="viewer-content hidden">
+            <div class="viewer-head">
+              <div>
+                <span class="section-kicker">NOW PLAYING</span>
+                <h2 id="viewer-title">—</h2>
+              </div>
+              <div class="viewer-actions">
+                <button id="open-vlc" class="ghost-button" title="Открыть текущий поток в VLC">VLC ↗</button>
+                <button id="remove-torrent" class="icon-button" title="Удалить сеанс">×</button>
+              </div>
+            </div>
+            <div id="player-shell" class="player-shell">
+              <div class="video-frame">
+                <video id="video" playsinline preload="auto"></video>
+                <div id="video-overlay" class="video-overlay"><span class="spinner"></span><span>Ожидание pieces…</span></div>
+              </div>
+              <div class="media-controls">
+                <button id="play-toggle" class="control-button" title="Воспроизвести / пауза">▶</button>
+                <span id="time-current" class="time-label">00:00</span>
+                <div class="timeline-wrap">
+                  <div id="timeline-cache" class="timeline-cache" title="Pieces в RAM"></div>
+                  <div id="timeline-buffer" class="timeline-buffer" title="Буфер плеера"></div>
+                  <input id="timeline" type="range" min="0" max="0" step="0.1" value="0" aria-label="Позиция видео">
+                </div>
+                <span id="time-total" class="time-label">--:--</span>
+                <span id="buffer-status" class="buffer-status" title="Сколько потока уже находится в буфере">буфер --</span>
+                <button id="mute-toggle" class="control-button" title="Включить / выключить звук">🔊</button>
+                <input id="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" aria-label="Громкость">
+                <button id="fullscreen" class="control-button" title="На весь экран">⛶</button>
+              </div>
+              <div id="audio-control" class="audio-control hidden">
+                <span>ОЗВУЧКА</span>
+                <select id="audio-select" aria-label="Выбор аудиодорожки"></select>
+              </div>
+            </div>
+            <div class="file-list-head"><span id="load-status">ЗАГРУЗКА · 0 Б</span><span id="active-cache">RAM · 0 МБ</span></div>
+            <div id="files-list" class="files-list"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer>
+      <span>Torfilms <small>0.1.0</small></span>
+      <span>Используйте только контент, на который у вас есть права.</span>
+      <span id="transfer-footer">↓ 0 KB/s · 0 peers</span>
+    </footer>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

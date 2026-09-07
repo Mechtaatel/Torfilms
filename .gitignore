@@ -1,0 +1,13 @@
+node_modules/
+.local-tls/
+.runtime/
+data/
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+.env
+.env.*
+!.env.example
+*.log
