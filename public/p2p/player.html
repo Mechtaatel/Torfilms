@@ -12,6 +12,7 @@
 <video controls playsinline preload="auto"></video>
 <section id="audio-panel" hidden><label>Озвучка <select id="audio-track"></select></label><button id="audio-refresh" type="button">Обновить озвучки</button>
 <button id="audio-original" type="button">Исходный P2P-поток</button>
+<label>Субтитры <select id="subtitle-track"><option value="">Выключены</option></select></label><p id="subtitle-status"></p>
 <p id="audio-mode"></p><div hidden><input id="audio-seek" type="range" min="0" max="0" step="1" value="0"><span id="audio-time"></span></div></section>
 <p>Лимит относится к завершённым кускам, не ко всей памяти вкладки. Буферы декодера и сетевых соединений используют дополнительную RAM. Приложение не записывает видео в IndexedDB, Cache Storage или файлы; подкачкой памяти управляет ОС.</p>
 </main><script src="./bootstrap.js"></script></body></html>

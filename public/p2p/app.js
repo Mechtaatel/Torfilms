@@ -4,6 +4,7 @@ import { videoFiles } from './catalog-model.js'
 import { createPieceFallback } from './piece-fallback.js'
 import { ramLimitBytes } from './ram-limits.js'
 import { streamMediaSource } from './media-source-player.js'
+import { readProgress, writeProgress } from './watch-progress.js'
 export function mountPlayer (root, { movie: initialMovie, quality: initialQuality, compact = false } = {}) {
 const $ = s => root.querySelector(s)
 const updateRamLabel = () => { if ($('#ram-value')) $('#ram-value').textContent = `${$('#ram').value} МБ` }
@@ -18,6 +19,39 @@ let joinQueue = Promise.resolve(), joinRequest = 0, catalogueRequest = 0, joinin
 let selectedFile = null, audioMedia = null, audioOffset = 0, audioActive = false, audioRequest = 0, audioTimer
 let trackScan = 0, trackRetry
 let mediaStream = null
+let resumeTime = null, lastProgress = 0, subtitleAbort, subtitleUrl, subtitleElement, watchSource
+function saveProgress () {
+  if (!selectedFile || !torrent || !watchSource || timelineTarget !== null || resumeTime !== null) return
+  const time = $('video').currentTime + (audioActive ? audioOffset : 0)
+  if (!Number.isFinite(time) || time < 1) return
+  const index = torrent.files.indexOf(selectedFile)
+  writeProgress(watchSource.movie, { hash: torrent.infoHash, quality: watchSource.quality, index, time: Math.floor(time), season: watchSource.episodes?.find(e => e.index === index)?.season ?? watchSource.season ?? 1 })
+}
+function clearSubtitles () {
+  subtitleAbort?.abort(); subtitleElement?.remove(); subtitleElement = null
+  if (subtitleUrl) URL.revokeObjectURL(subtitleUrl)
+  subtitleUrl = null
+}
+async function applySubtitles () {
+  clearSubtitles()
+  const id = $('#subtitle-track')?.value
+  if (!id || !audioMedia) return
+  const controller = subtitleAbort = new AbortController()
+  try {
+    $('#subtitle-status').textContent = 'Загружаю субтитры…'
+    const response = await fetch(`/bridge/subtitles/${audioMedia.hash}/${audioMedia.index}?file=${id}`, { signal: controller.signal })
+    if (!response.ok) throw new Error((await response.json()).error || 'Ошибка субтитров')
+    const text = await response.text()
+    if (controller.signal.aborted) return
+    subtitleUrl = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
+    const track = subtitleElement = document.createElement('track')
+    track.kind = 'subtitles'; track.label = 'Субтитры'; track.srclang = 'ru'; track.src = subtitleUrl; track.default = true
+    track.onload = () => { for (const cue of Array.from(track.track.cues || [])) { cue.startTime = Math.max(0, cue.startTime - (audioActive ? audioOffset : 0)); cue.endTime = Math.max(cue.startTime, cue.endTime - (audioActive ? audioOffset : 0)) }; track.track.mode = 'showing'; $('#subtitle-status').textContent = 'Субтитры включены (WebVTT)' }
+    track.onerror = () => { $('#subtitle-status').textContent = 'Браузер не смог прочитать субтитры' }
+    $('video').append(track); track.track.mode = 'showing'
+  } catch (e) { if (!controller.signal.aborted) $('#subtitle-status').textContent = e.message }
+}
+if ($('#subtitle-track')) $('#subtitle-track').onchange = applySubtitles
 let timelineDragging = false, timelineTarget = null
 const clockText = seconds => {
   const n = Math.max(0, Math.floor(seconds || 0))
@@ -39,10 +73,13 @@ async function mediaJson (route) {
   return data
 }
 async function chooseFile (file, value) {
+  saveProgress(); clearSubtitles()
+  if ($('#subtitle-track')) { $('#subtitle-track').replaceChildren(new Option('Выключены', '')); $('#subtitle-status').textContent = '' }
   mediaStream?.destroy(); mediaStream = null
   ++audioRequest; ++trackScan; clearTimeout(trackRetry)
   clearTimeout(audioTimer)
   selectedFile = file; audioMedia = null; audioActive = false; audioOffset = 0
+  watchSource = catalogueSelection
   timelineDragging = false; timelineTarget = null; renderTimeline()
   if ($('#episode')) $('#episode').value = String(value.files.indexOf(file))
   $('#audio-panel').hidden = true
@@ -66,19 +103,26 @@ async function refreshTracks (initial = false) {
     if (disposed || scan !== trackScan || selectedFile !== file) return
     data.tracks = [...data.tracks.map(t => ({ ...t, id: String(t.index) })), ...(data.externalTracks || []).map(t => ({ ...t, id: `file:${t.fileIndex}` }))]
     audioMedia = { ...data, index, hash: value.infoHash }
+    if ($('#subtitle-track')) {
+      const current = $('#subtitle-track').value
+      $('#subtitle-track').replaceChildren(new Option('Выключены', ''))
+      for (const sub of data.subtitles || []) $('#subtitle-track').append(new Option(sub.title, String(sub.fileIndex)))
+      if ([...$('#subtitle-track').options].some(o => o.value === current)) $('#subtitle-track').value = current
+    }
     renderTimeline()
     $('#audio-track').replaceChildren()
     for (const track of data.tracks) {
       const option = document.createElement('option')
       option.value = track.id
-      option.textContent = [track.title || `Дорожка ${track.index}`, track.external ? 'Внешняя озвучка' : '', track.language, track.codec, track.channels ? `${track.channels} ch` : ''].filter(Boolean).join(' · ')
+      option.textContent = [catalogueSelection?.audioLabels?.[track.external ? `file:${track.fileIndex}` : `${index}:${track.index}`] || track.title || `Дорожка ${track.index}`, track.external ? 'Внешняя озвучка' : '', track.language, track.codec, track.channels ? `${track.channels} ch` : ''].filter(Boolean).join(' · ')
       $('#audio-track').append(option)
     }
     if (data.tracks.some(t => t.id === previous)) $('#audio-track').value = previous
     $('#audio-track').disabled = !data.tracks.length
     $('#audio-seek').max = String(data.duration)
     $('#audio-mode').textContent = data.tracks.length ? 'Список озвучек обновлён. Выберите нужную дорожку.' : 'Озвучки не найдены. Можно повторить поиск без перезапуска видео.'
-    if (data.pending) trackRetry = setTimeout(() => refreshTracks(), 1000)
+    if (!data.pending && resumeTime !== null && data.tracks.length) { const target = Math.min(resumeTime, Math.max(0, data.duration - 1)); resumeTime = null; await applyAudio(target, true) }
+    else if (data.pending) trackRetry = setTimeout(() => refreshTracks(), 1000)
     else if (initial && !audioActive && data.tracks.length && !supportsAudio(data.tracks[0])) await applyAudio()
   } catch (e) {
     if (disposed || scan !== trackScan || selectedFile !== file) return
@@ -118,6 +162,7 @@ async function applyAudio (position, resume) {
     })
     audioOffset = mediaStream ? 0 : plan.origin; audioActive = true
     if (!mediaStream) { video.src = url; video.load() }
+    if ($('#subtitle-track')?.value) applySubtitles()
     let positioned = !!mediaStream || plan.localTime === 0
     const wait = () => {
       if (request !== audioRequest) return
@@ -147,6 +192,9 @@ $('#audio-seek').onchange = () => {
 }
 $('video').addEventListener('seeked', () => { if (!audioActive) timelineTarget = null; renderTimeline() })
 $('video').addEventListener('timeupdate', renderTimeline)
+$('video').addEventListener('timeupdate', () => { if (Date.now() - lastProgress > 5000) { saveProgress(); lastProgress = Date.now() } })
+$('video').addEventListener('pause', saveProgress)
+globalThis.addEventListener?.('pagehide', saveProgress)
 const viewer = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
 async function bridgePost (route, data) {
   const response = await fetch(`/bridge/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
@@ -158,6 +206,7 @@ const trackers = ['wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xy
 const status = text => { if (!disposed) $('#status').textContent = text }
 $('video').addEventListener('playing', () => status('Воспроизведение'))
 async function stop () {
+  saveProgress(); clearSubtitles()
   mediaStream?.destroy(); mediaStream = null
   ++trackScan; clearTimeout(trackRetry)
   ++audioRequest; clearTimeout(audioTimer); audioMedia = null; selectedFile = null; $('#audio-panel').hidden = true
@@ -247,7 +296,10 @@ async function connect (source, selection, request) {
       ready(value, limit)
       if (selection) {
         const videos = videoFiles(value.files, selection.episodes)
-        const chosen = videos.find(f => f.index === selection.fileIndex) || videos[0]
+        const progress = readProgress(selection.movie)
+        const remembered = progress?.hash === value.infoHash && progress.quality === selection.quality ? videos.find(f => f.index === progress.index) : null
+        const chosen = remembered || videos.find(f => f.index === selection.fileIndex) || videos[0]
+        resumeTime = remembered ? progress.time : null
         if (chosen) chooseFile(chosen.file, value)
         else status('В раздаче не найдено видео. Выберите другую раздачу.')
       }
@@ -297,6 +349,7 @@ async function catalogueQuality (movie, quality) {
     const saved = await mediaJson(`/catalog/source/${movie}/${quality}`)
     if (request !== catalogueRequest) return
     catalogueSelection = { ...saved, movie, quality }
+    if (initialMovie?.activeSeason != null) catalogueSelection.episodes = (saved.episodes || []).map(e => ({ ...e, excluded: e.excluded || (e.season ?? saved.season ?? 1) !== initialMovie.activeSeason }))
     $('#magnet').value = saved.magnet
     $('#join').requestSubmit()
   } catch (error) { status(error.message) }
@@ -322,6 +375,7 @@ return {
   playQuality: quality => catalogueQuality(movieId, quality),
   retryIfStopped () { if (!$('video').getAttribute('src')) catalogueQuality(movieId, $('#quality-slot select')?.value || catalogueSelection?.quality || initialQuality) },
   destroy () {
+    saveProgress(); globalThis.removeEventListener?.('pagehide', saveProgress)
     disposed = true
     ++trackScan; clearTimeout(trackRetry)
     ++joinRequest; ++catalogueRequest; ++audioRequest; clearTimeout(audioTimer); clearInterval(statsTimer)

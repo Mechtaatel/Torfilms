@@ -1,4 +1,6 @@
 import { tagsOf, seasonsOf, sourcesFor } from './catalog-model.js'
+import { readProgress } from './watch-progress.js'
+import { openSeriesEditor } from './series-editor.js'
 const $ = s => document.querySelector(s)
 let movies = [], category = '', editing = null
 let activePlayer = null, playerRequest = 0
@@ -15,9 +17,9 @@ function render () {
     if (!movie) { content.append(node('h1', 'Фильм не найден'), node('p', 'Карточку с таким IMDb ID ещё не добавили.')); return }
     document.title = `${movie.title} — Torfilms`
     const seasons = seasonsOf(movie)
-    const chosenSeason = Number(new URLSearchParams(location.search).get('season'))
+    const chosenSeason = Number(new URLSearchParams(location.search).get('season') ?? readProgress(id)?.season)
     const season = seasons.find(s => s.number === chosenSeason) || seasons[0]
-    const playable = { ...movie, sources: sourcesFor(movie, season?.number) }
+    const playable = { ...movie, activeSeason: season?.number, sources: sourcesFor(movie, season?.number) }
     const back = node('a', '← В библиотеку', 'muted'); back.href = '/'; content.append(back)
     const detail = node('section', '', 'detail'); detail.style.marginTop = '24px'
     const body = node('div', '', 'body'); body.append(node('div', movie.kind, 'eyebrow'), node('h1', movie.title), node('p', [movie.year, movie.genre].filter(Boolean).join(' · '), 'muted'))
@@ -41,14 +43,22 @@ function render () {
         else {
           const { createCompactPlayer } = await import('./compact-player.js')
           if (request !== playerRequest) return
-          activePlayer = createCompactPlayer(player, playable, playable.sources[0]?.id)
+          const progress = readProgress(id)
+          activePlayer = createCompactPlayer(player, playable, playable.sources.find(s => s.id === progress?.quality)?.id || playable.sources[0]?.id)
         }
         player.hidden = false; player.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } catch (error) { $('#notice').textContent = `Не удалось открыть плеер: ${error.message}` }
       finally { play.disabled = false }
     }
     if (!playable.sources.length) actions.append(node('span', 'Раздачи этого сезона пока не добавлены', 'muted'))
-    actions.append(play, edit)
+    const seriesEdit = node('button', 'Редактор серий/озвучек')
+    seriesEdit.onclick = async () => {
+      try {
+        const fresh = (await api('/catalog/movies')).find(m => m.id === movie.id)
+        openSeriesEditor(fresh, async draft => { await api('/catalog/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) }); movies = await api('/catalog/movies'); render() })
+      } catch (e) { $('#notice').textContent = e.message }
+    }
+    actions.append(play, edit, seriesEdit)
     body.append(node('p', movie.description || 'Описание пока не добавлено.', 'description'), actions)
     detail.append(cover({ ...movie, poster: season?.poster || movie.poster }), body); content.append(detail)
     if (seasons.length) {
@@ -77,25 +87,12 @@ const field = name => form.elements.namedItem(name)
 function addSource (source = {}) {
   if ($('#sources').children.length >= 200) return
   const row = node('fieldset'); row.source = source; row.append(node('legend', 'Версия фильма'))
-  if (source.episodes?.length) {
-    const list = node('details'), summary = node('summary')
-    const updateCount = () => { summary.textContent = `Серии: ${row.source.episodes.filter(e => !e.excluded).length} из ${row.source.episodes.length}` }
-    row.source = { ...source, episodes: source.episodes.map(e => ({ ...e })) }
-    updateCount(); list.append(summary)
-    for (const episode of row.source.episodes) {
-      const label = node('label', episode.filename || `Файл ${episode.index}`), title = node('input'), include = node('input'), enabled = node('label', 'Показывать в списке серий')
-      title.value = episode.title; title.maxLength = 200; title.oninput = () => { episode.title = title.value }
-      include.type = 'checkbox'; include.checked = !episode.excluded
-      include.onchange = () => { episode.excluded = !include.checked; updateCount() }
-      label.append(title); enabled.append(include); list.append(label, enabled)
-    }
-    row.append(list)
-  }
+  if (source.episodes?.length) row.append(node('p', `Видео: ${source.episodes.filter(e => !e.excluded).length}. Названия и сезоны — в отдельном «Редакторе серий/озвучек».`))
   for (const [name, title, value] of [['label', 'Качество / версия', source.label], ['season', 'Номер сезона (для сериалов)', source.season ?? 1], ['magnet', 'Magnet-ссылка', source.magnet], ['fileIndex', 'Начальный индекс видео (серии доступны в плеере)', source.fileIndex ?? 0]]) { const label = node('label', title), input = node('input'); input.dataset.field = name; input.value = value ?? ''; input.type = ['fileIndex', 'season'].includes(name) ? 'number' : 'text'; if (input.type === 'number') { input.min = '0'; input.step = '1' } if (name === 'label') input.required = true; label.append(input); row.append(label) }
   const upload = node('input'); upload.type = 'file'; upload.accept = '.torrent'; upload.dataset.field = 'torrent'
   const label = node('label', source.hasTorrent || source.torrentBase64 ? '.torrent сохранён. Выберите файл, чтобы заменить.' : 'Или .torrent-файл (до 3 МБ)'); label.append(upload)
-  row.querySelector('[data-field=magnet]').oninput = () => { row.source = { ...row.source, episodes: [], hasTorrent: false, torrentBase64: '' }; row.querySelector('details')?.remove() }
-  upload.onchange = () => { row.source = { ...row.source, episodes: [] }; row.querySelector('details')?.remove() }
+  row.querySelector('[data-field=magnet]').oninput = () => { row.source = { ...row.source, episodes: [], audioLabels: {}, hasTorrent: false, torrentBase64: '' }; row.querySelector('details')?.remove() }
+  upload.onchange = () => { row.source = { ...row.source, episodes: [], audioLabels: {} }; row.querySelector('details')?.remove() }
   const remove = node('button', 'Убрать качество'); remove.type = 'button'; remove.onclick = () => row.remove(); row.append(label, remove); $('#sources').append(row)
 }
 function addSeason (season = {}) {

@@ -7,11 +7,12 @@ export function seasonsOf (movie) {
   for (const source of movie.sources || []) {
     const number = source.season ?? 1
     if (!seasons.has(number)) seasons.set(number, { number, title: `Сезон ${number}`, poster: '' })
+    for (const e of source.episodes || []) if (!e.excluded && e.season != null && !seasons.has(e.season)) seasons.set(e.season, { number: e.season, title: `Сезон ${e.season}`, poster: '' })
   }
   return [...seasons.values()].sort((a, b) => a.number - b.number)
 }
 export function sourcesFor (movie, season) {
-  return season == null ? movie.sources : movie.sources.filter(s => (s.season ?? 1) === season)
+  return season == null ? movie.sources : movie.sources.filter(s => s.episodes?.length ? s.episodes.some(e => !e.excluded && (e.season ?? s.season ?? 1) === season) : (s.season ?? 1) === season)
 }
 export function videoFiles (files, overrides = []) {
   const settings = new Map(overrides.map(e => [e.index, e]))

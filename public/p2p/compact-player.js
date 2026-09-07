@@ -12,6 +12,7 @@ export function createCompactPlayer (host, movie, quality) {
       <section id="audio-panel" hidden>
         <div class="player-tools"><label>Озвучка <select id="audio-track"></select></label><button id="audio-refresh" type="button">Обновить озвучки</button><button id="audio-original" type="button">Исходный звук</button></div>
         <p id="audio-mode" class="muted"></p>
+        <label>Субтитры <select id="subtitle-track"><option value="">Выключены</option></select></label><p id="subtitle-status" class="muted"></p>
       </section>
       <div class="player-tools"><label>RAM-кеш (500–2048 МБ) <input id="ram" type="range" min="500" max="2048" step="1" value="500"><output id="ram-value" for="ram">500 МБ</output></label><label>Отдача, КиБ/с <input id="upload" type="number" min="1" max="10240" value="512"></label><button id="apply-settings" type="button">Применить и переподключить</button></div>
       <p class="muted">Изменение лимитов переподключает видео с начала. Кеш используется на этом устройстве; мост имеет отдельный кеш. IP-адрес виден участникам P2P.</p>

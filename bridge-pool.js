@@ -71,7 +71,7 @@ const server = http.createServer(async (req, res) => {
       if (!entry) return json(409, { error: 'Раздача остановлена. Подключитесь повторно.' })
       return json(200, await post(entry, '/bridge/demand', data))
     }
-    const media = /^\/bridge\/(?:raw|tracks|audio-plan|audio|metadata|piece)\/([a-f0-9]{40})(?:\/|$)/.exec(url.pathname)
+    const media = /^\/bridge\/(?:raw|tracks|audio-plan|audio|metadata|piece|subtitles)\/([a-f0-9]{40})(?:\/|$)/.exec(url.pathname)
     if (media) {
       const entry = workers.get(media[1])
       if (!entry) return json(404, { error: 'Раздача не активна' })

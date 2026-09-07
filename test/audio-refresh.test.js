@@ -8,13 +8,14 @@ test('failed audio discovery retries without touching video and retains selected
   const source = app.slice(app.indexOf('async function refreshTracks'), app.indexOf("if ($('#audio-refresh'))"))
   const elements = new Map()
   const $ = selector => {
+    if (selector === '#subtitle-track') return null
     assert.notEqual(selector, 'video', 'refresh must not touch playback')
     if (!elements.has(selector)) elements.set(selector, { value: '', children: [], replaceChildren () { this.children = [] }, append (c) { this.children.push(c) } })
     return elements.get(selector)
   }
   let attempts = 0, retry
   const file = {}
-  const context = vm.createContext({ $, bridge: true, selectedFile: file, torrent: { files: [file], infoHash: 'hash' }, disposed: false, trackScan: 0, audioMedia: null, audioActive: false, trackRetry: null,
+  const context = vm.createContext({ $, catalogueSelection: null, resumeTime: null, bridge: true, selectedFile: file, torrent: { files: [file], infoHash: 'hash' }, disposed: false, trackScan: 0, audioMedia: null, audioActive: false, trackRetry: null,
     document: { createElement: () => ({}) }, clearTimeout () {}, setTimeout (fn) { retry = fn },
     mediaJson: async () => { if (++attempts === 1) throw new Error('timeout'); return { duration: 100, tracks: [{ index: 0, codec: 'flac' }], externalTracks: [{ fileIndex: 4, title: 'AniDub', external: true }] } },
     renderTimeline () {}, supportsAudio: () => true, applyAudio: () => { throw new Error('Refresh switched the source') }

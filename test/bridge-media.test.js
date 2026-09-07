@@ -11,10 +11,13 @@ test('bridge lists tracks, copies AAC mono and converts selected AC3 to AAC ster
   assert.equal(source.status, 0, source.stderr.toString())
   const external = spawnSync('ffmpeg', ['-v', 'error', '-i', 'pipe:0', '-map', '0:a:0', '-c:a', 'copy', '-f', 'matroska', 'pipe:1'], { input: source.stdout })
   assert.equal(external.status, 0)
-  const bytes = Buffer.concat([source.stdout, external.stdout])
+  const subtitles = spawnSync('ffmpeg', ['-v', 'error', '-f', 'srt', '-i', 'pipe:0', '-f', 'ass', 'pipe:1'], { input: '1\n00:00:00,200 --> 00:00:01,000\nHello subtitles\n' })
+  assert.equal(subtitles.status, 0)
+  const bytes = Buffer.concat([source.stdout, external.stdout, subtitles.stdout])
   const hash = 'a'.repeat(40)
   const torrent = { ready: true, infoHash: hash, pieceLength: 16384, bitfield: { get: () => true }, _select () {}, _deselect () {}, store: { get (index, opts, cb) { const start = index * 16384 + opts.offset; cb(null, bytes.subarray(start, start + opts.length)) } }, files: [{ offset: 0, length: bytes.length }] }
   torrent.files = [{ name: 'Show ep.01.mkv', offset: 0, length: source.stdout.length }, { path: 'RUS Sound/AniDub/Show ep.01.AniDub.mka', offset: source.stdout.length, length: external.stdout.length }]
+  torrent.files.push({ name: 'Show ep.01.AniPlay.ass', offset: source.stdout.length + external.stdout.length, length: subtitles.stdout.length })
   let base
   const media = bridgeMedia(() => torrent, () => base)
   const server = http.createServer(async (req, res) => { if (!await media.handle(req, res, new URL(req.url, base))) { res.writeHead(404); res.end() } })
@@ -24,6 +27,12 @@ test('bridge lists tracks, copies AAC mono and converts selected AC3 to AAC ster
     const tracks = await (await fetch(`${base}/bridge/tracks/${hash}/0`)).json()
     assert.deepEqual(tracks.tracks.map(t => t.codec), ['aac', 'ac3'])
     assert.equal(tracks.externalTracks[0].fileIndex, 1)
+    assert.equal(tracks.subtitles[0].fileIndex, 2)
+    const subs = await fetch(`${base}/bridge/subtitles/${hash}/0?file=2`)
+    assert.equal(subs.status, 200)
+    const vtt = await subs.text()
+    assert.match(vtt, /^WEBVTT/); assert.match(vtt, /Hello subtitles/)
+    assert.equal((await fetch(`${base}/bridge/subtitles/${hash}/0?file=1`)).status, 400)
     await fetch(`${base}/bridge/tracks/${hash}/1`).then(r => r.json())
     const externalResponse = await fetch(`${base}/bridge/audio/${hash}/0?track=0&copy=1&audioFile=1`)
     assert.equal(externalResponse.status, 200)
