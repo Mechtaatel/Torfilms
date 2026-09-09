@@ -75,6 +75,25 @@ the backend allowlist. No secret belongs in this file.
 Server-side CORS changes require a normal restart of the home Node services;
 this implementation does not restart the active player or supervisor.
 
+## Free home bridge through Cloudflare Quick Tunnel
+
+When a permanent domain is not available, the home bridge can be exposed for
+testing without opening router ports or configuring a DNS zone. `cloudflared`
+is kept outside Git in `.runtime/` and the helper downloads the current Windows
+binary on first run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-cloudflare-quick-tunnel.ps1
+```
+
+The script maps the public temporary HTTPS address to
+`http://127.0.0.1:18183`. Keep the window open, copy the printed
+`trycloudflare.com` URL into the GitHub Actions variable
+`TORFILMS_BACKEND_URL`, then run the Pages workflow manually. The temporary
+address changes after the tunnel restarts. Quick Tunnels are for testing, not
+production; a stable hostname requires a Cloudflare-managed domain and a named
+tunnel. The home PC and its upload bandwidth remain the streaming origin.
+
 ## Verification before publication
 
 Run `npm test`. Check actual Pages → Render OPTIONS, catalog loading, Range 206,
