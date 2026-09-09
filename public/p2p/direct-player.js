@@ -1,4 +1,5 @@
 import { startDirectAudio } from './direct-audio.js'
+import { nativeStallCheck } from './native-stall.js'
 
 // Video always stays on the original torrent URL, even with external audio.
 export function startDirectPlayback (video, file, { position = 0, torrent, fileIndex, onTracks = () => {}, onAudioReady = () => {}, onReady, onError }) {
@@ -17,6 +18,7 @@ export function startDirectPlayback (video, file, { position = 0, torrent, fileI
   video.audioTracks?.addEventListener?.('addtrack', tracks)
   video.audioTracks?.addEventListener?.('removetrack', tracks)
   try { file.streamTo(video) } catch (e) { onError(e) }
+  const watchdog = setInterval(nativeStallCheck(video, onError), 1000)
   return { transport: 'direct', selectAudio (track) {
     external?.destroy(); external = null
     if (track?.external) {
@@ -26,5 +28,5 @@ export function startDirectPlayback (video, file, { position = 0, torrent, fileI
       Array.from(video.audioTracks || []).forEach((t, i) => { t.enabled = i === index })
       onAudioReady()
     }
-  }, destroy () { destroyed = true; external?.destroy(); video.removeEventListener('loadedmetadata', ready); video.removeEventListener('error', error); video.audioTracks?.removeEventListener?.('addtrack', tracks); video.audioTracks?.removeEventListener?.('removetrack', tracks) } }
+  }, destroy () { destroyed = true; clearInterval(watchdog); external?.destroy(); video.removeEventListener('loadedmetadata', ready); video.removeEventListener('error', error); video.audioTracks?.removeEventListener?.('addtrack', tracks); video.audioTracks?.removeEventListener?.('removetrack', tracks) } }
 }

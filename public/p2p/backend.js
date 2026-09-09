@@ -14,6 +14,13 @@ export function trackerUrl (route = '/tracker') {
 }
 export const siteRoot = new URL('./', import.meta.url).pathname
 export function filmUrl (id, season) {
-  const url = config.staticRouting ? `${siteRoot}?film=${id}` : `${siteRoot}film/${id}`
-  return season == null ? url : `${url}${config.staticRouting ? '&' : '?'}season=${encodeURIComponent(season)}`
+  if (!/^tt\d{7,10}$/.test(id)) throw new Error('Invalid IMDb ID')
+  return `${siteRoot}${id}`
+}
+export function filmId (pathname, search = '', root = siteRoot) {
+  if (!pathname.startsWith(root)) return null
+  const path = pathname.slice(root.length)
+  const match = /^(?:film\/)?(tt\d{7,10})\/?$/.exec(path)
+  const legacy = new URLSearchParams(search).get('film')
+  return match?.[1] || (/^tt\d{7,10}$/.test(legacy || '') ? legacy : null)
 }

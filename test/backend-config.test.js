@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import config from '../public/p2p/runtime-config.js'
-import { backendUrl, trackerUrl, filmUrl } from '../public/p2p/backend.js'
+import { backendUrl, trackerUrl, filmUrl, filmId } from '../public/p2p/backend.js'
 import { backendAccess, allowedOrigin } from '../lib/backend-access.js'
 test('backend origin resolves APIs and secure trackers without affecting local defaults', () => {
   try {
@@ -11,7 +11,12 @@ test('backend origin resolves APIs and secure trackers without affecting local d
     assert.equal(trackerUrl('/tracker/hash'), 'wss://example.onrender.com/tracker/hash')
     assert.throws(() => backendUrl('//evil.example'))
     config.staticRouting = true
-    assert.match(filmUrl('tt2359704', 'Bonus'), /\?film=tt2359704&season=Bonus$/)
+    assert.match(filmUrl('tt2359704', 'Bonus'), /\/tt2359704$/)
+    assert.equal(filmId('/Torfilms/tt6424454', '', '/Torfilms/'), 'tt6424454')
+    assert.equal(filmId('/Torfilms/tt6424454/', '', '/Torfilms/'), 'tt6424454')
+    assert.equal(filmId('/Torfilms/', '?film=tt6424454&season=0', '/Torfilms/'), 'tt6424454')
+    assert.equal(filmId('/film/tt6424454', '', '/'), 'tt6424454')
+    assert.equal(filmId('/other/tt6424454', '', '/Torfilms/'), null)
   } finally { config.backendUrl = ''; config.staticRouting = false }
 })
 test('CORS allows exact frontend origin, range preflight and protects public catalog', () => {

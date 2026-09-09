@@ -18,6 +18,7 @@ export function startDirectAudio (video, options) {
   let stream, stopped = false, serial = 0, ready = false, held = false, internalPause = false
   let waitingSince = null, videoWaiting = false, lastCorrection = -Infinity
   let audioPlayPending = false, videoPlayPending = false
+  let videoTime = video.currentTime, advancedAt = Date.now()
   let wantsPlay = !video.paused
   const listeners = []
   const listen = (target, name, fn) => { target.addEventListener(name, fn); listeners.push(() => target.removeEventListener(name, fn)) }
@@ -43,6 +44,9 @@ export function startDirectAudio (video, options) {
   const sync = () => {
     if (stopped) return
     audio.volume = video.volume; audio.muted = video.muted
+    if (Math.abs(video.currentTime - videoTime) > 0.001) {
+      videoTime = video.currentTime; advancedAt = Date.now(); videoWaiting = false
+    }
     if (!ready) { hold(); return }
     if (video.seeking) { audio.pause(); return }
     // HAVE_CURRENT_DATA and short waiting/canplay transitions are normal while
@@ -58,9 +62,13 @@ export function startDirectAudio (video, options) {
       if (Date.now() - waitingSince >= 400) { hold(); return }
     } else waitingSince = null
     if (videoWaiting) {
-      if (video.readyState < 3 && ahead(video, video.currentTime) < 0.25) { audio.pause(); return }
-      videoWaiting = false
+      // Buffered bytes/canplay do not prove that the picture has resumed.
+      // Never restart sound and rewind it repeatedly to a frozen video clock.
+      if (held && wantsPlay) { held = false; play(video, true) }
+      audio.pause(); return
     }
+    if (!held && !video.paused && Date.now() - advancedAt >= 600) { audio.pause(); return }
+    if (!held && video.paused) { audio.pause(); return }
     const drift = audio.currentTime - video.currentTime
     // Repeated currentTime writes cause a seek/buffer/seek loop on Android.
     // Correct small clock drift gently; reserve seeks for substantial offsets.
@@ -77,7 +85,7 @@ export function startDirectAudio (video, options) {
   }
   const restart = () => {
     const request = ++serial
-    ready = false; waitingSince = null; videoWaiting = false; hold(); stream?.destroy()
+    ready = false; waitingSince = null; videoWaiting = false; videoTime = video.currentTime; advancedAt = Date.now(); hold(); stream?.destroy()
     stream = startLocalRemux(audio, { ...options, audioOnly: true, position: video.currentTime, resume: false,
       onMetadata: () => {}, onSeek: () => {},
       onReady: () => { if (!stopped && serial === request) { ready = true; audio.currentTime = video.currentTime; lastCorrection = Date.now(); options.onReady?.(); sync() } },
@@ -90,7 +98,8 @@ export function startDirectAudio (video, options) {
   listen(video, 'seeking', () => { ready = false; hold() })
   listen(video, 'seeked', restart)
   listen(video, 'ended', () => { wantsPlay = false; audio.pause() })
-  for (const event of ['playing', 'canplay', 'volumechange', 'ratechange']) listen(video, event, sync)
+  listen(video, 'playing', () => { videoWaiting = false; videoTime = video.currentTime; advancedAt = Date.now(); sync() })
+  for (const event of ['canplay', 'volumechange', 'ratechange']) listen(video, event, sync)
   listen(audio, 'waiting', sync); listen(audio, 'canplay', sync)
   const timer = setInterval(sync, 200)
   function destroy () {

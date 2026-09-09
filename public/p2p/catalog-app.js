@@ -1,5 +1,5 @@
 import { tagsOf, seasonsOf, sourcesFor, seasonKey } from './catalog-model.js'
-import { backendFetch, filmUrl, siteRoot } from './backend.js'
+import { backendFetch, filmUrl, filmId, siteRoot } from './backend.js'
 import { readProgress } from './watch-progress.js'
 import { openSeriesEditor } from './series-editor.js'
 const $ = s => document.querySelector(s)
@@ -8,18 +8,26 @@ let activePlayer = null, playerRequest = 0
 const node = (tag, text, className) => { const e = document.createElement(tag); if (text) e.textContent = text; if (className) e.className = className; return e }
 async function api (route, options) { const response = await backendFetch(route, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Сервер недоступен'); return data }
 function cover (movie) { const box = node('div', '', 'cover'); if (movie.poster) { const img = new Image(); img.src = movie.poster; img.alt = movie.title; img.loading = 'lazy'; img.onerror = () => box.replaceChildren(node('span', 'Нет обложки')); box.append(img) } else box.append(node('span', 'Нет обложки')); return box }
-function card (movie) { const a = node('a', '', 'card'); a.href = filmUrl(movie.id); a.append(cover(movie), node('h3', movie.title), node('small', [movie.year, movie.kind, movie.genre].filter(Boolean).join(' · '))); return a }
-function render () {
+function card (movie) {
+  const a = node('a', '', 'card'); a.href = filmUrl(movie.id)
+  a.onclick = event => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+    event.preventDefault(); history.pushState({ movie: movie.id }, '', a.href); render()
+  }
+  a.append(cover(movie), node('h3', movie.title), node('small', [movie.year, movie.kind, movie.genre].filter(Boolean).join(' · '))); return a
+}
+function render (options = {}) {
   ++playerRequest; activePlayer?.destroy(); activePlayer = null
   const content = $('#content'); content.replaceChildren()
-  const id = /\/film\/(tt\d{7,10})\/?$/.exec(location.pathname)?.[1] || new URLSearchParams(location.search).get('film')
+  const id = filmId(location.pathname, location.search)
   if (id) {
     const movie = movies.find(m => m.id === id)
     if (!movie) { content.append(node('h1', 'Фильм не найден'), node('p', 'Карточку с таким IMDb ID ещё не добавили.')); return }
     document.title = `${movie.title} — Torfilms`
     const seasons = seasonsOf(movie)
-    const chosenSeason = new URLSearchParams(location.search).get('season') ?? readProgress(id)?.season
+    const chosenSeason = (history.state?.movie === id ? history.state.season : null) ?? new URLSearchParams(location.search).get('season') ?? readProgress(id)?.season
     const season = seasons.find(s => seasonKey(s.number) === seasonKey(chosenSeason)) || seasons[0]
+    history.replaceState({ ...history.state, movie: id, season: season?.number }, '', filmUrl(id))
     const playable = { ...movie, activeSeason: season?.number, sources: sourcesFor(movie, season?.number) }
     const back = node('a', '← В библиотеку', 'muted'); back.href = siteRoot; content.append(back)
     const detail = node('section', '', 'detail'); detail.style.marginTop = '24px'
@@ -64,10 +72,22 @@ function render () {
     detail.append(cover({ ...movie, poster: season?.poster || movie.poster }), body); content.append(detail)
     if (seasons.length) {
       const strip = node('section', '', 'season-list'); strip.setAttribute('aria-label', 'Сезоны сериала')
-      for (const item of seasons) { const link = node('a', '', `season-card${item.number === season.number ? ' selected' : ''}`); link.href = filmUrl(movie.id, item.number); if (item.number === season.number) link.setAttribute('aria-current', 'page'); link.append(cover({ title: item.title, poster: item.poster || movie.poster }), node('strong', item.title)); strip.append(link) }
+      for (const item of seasons) {
+        const button = node('button', '', `season-card${seasonKey(item.number) === seasonKey(season.number) ? ' selected' : ''}`)
+        button.type = 'button'; button.setAttribute('aria-pressed', String(seasonKey(item.number) === seasonKey(season.number)))
+        button.append(cover({ title: item.title, poster: item.poster || movie.poster }), node('strong', item.title))
+        button.onclick = () => {
+          if (seasonKey(item.number) === seasonKey(season.number)) return
+          const autoplay = !!activePlayer
+          history.replaceState({ ...history.state, movie: id, season: item.number }, '', filmUrl(id))
+          render({ autoplay })
+        }
+        strip.append(button)
+      }
       content.append(node('h2', 'Сезоны'), strip)
     }
     content.append(player)
+    if (options.autoplay && playable.sources.length) play.onclick()
     return
   }
   document.title = 'Torfilms — домашний кинотеатр'
@@ -81,7 +101,6 @@ function render () {
   const heading = node('div', '', 'section-head'); heading.append(node('h1', term ? 'Результаты поиска' : 'Ваша библиотека'), node('span', `${filtered.length} в каталоге`, 'muted')); content.append(heading)
   if (!filtered.length) { const empty = node('div', '', 'empty'); empty.append(node('h2', movies.length ? 'Ничего не найдено' : 'Большой экран начинается здесь'), node('p', movies.length ? 'Попробуйте другое название или категорию.' : 'Добавьте фильм по IMDb ID, загрузите обложку и сохраните раздачи нужного качества. Библиотека будет доступна всем вашим устройствам в домашней сети.', 'muted')); if (!movies.length) { const add = node('button', 'Добавить первый фильм', 'primary'); add.onclick = () => openEditor(); empty.append(add) } content.append(empty) }
   else { const grid = node('section', '', 'grid'); grid.setAttribute('aria-label', 'Фильмы'); filtered.forEach(m => grid.append(card(m))); content.append(grid) }
-  content.append(node('div', 'Ваш фильм. Ваше качество. Общая библиотека для дома — отдельный RAM-кеш на каждом устройстве и параллельный Hybrid-мост на сервере.', 'note'))
 }
 const form = $('#movie-form')
 const field = name => form.elements.namedItem(name)

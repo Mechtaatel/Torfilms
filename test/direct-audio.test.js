@@ -85,5 +85,21 @@ test('Android readiness flapping and small clock drift do not cause repeated pau
   assert.equal(pauses, 0, 'no pause/play loop with buffered media')
   assert.equal(seeks, 0, 'minor drift must not trigger repeated seeks')
   assert.ok(audio.playbackRate < video.playbackRate)
+  // Even a seemingly full buffer cannot clear a real video waiting state.
+  video.dispatchEvent(new Event('waiting'))
+  const seeksBeforeStall = seeks
+  for (let i = 0; i < 40; i++) {
+    now += 200
+    video.dispatchEvent(new Event('canplay')); audio.dispatchEvent(new Event('canplay')); tick()
+    assert.equal(audio.paused, true, 'do not replay sound while picture is frozen')
+  }
+  assert.equal(seeks, seeksBeforeStall, 'no repeated rewind to the frozen frame')
+  video.time += 0.2; tick()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(audio.paused, false, 'resume when the video clock advances')
+  // Also detect a frozen clock when a browser misses its waiting event.
+  now += 601; tick()
+  assert.equal(audio.paused, true)
+  for (let i = 0; i < 20; i++) { now += 200; tick(); assert.equal(audio.paused, true) }
   controller.destroy()
 })

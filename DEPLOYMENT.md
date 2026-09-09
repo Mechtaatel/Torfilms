@@ -59,8 +59,12 @@ video files. Do not put `DATABASE_URL` in GitHub, `render.yaml`, or a frontend
 configuration file.
 The build changes only dist-pages, not the running home application's config.
 
-Pages uses URLs like `/YOUR-REPOSITORY/?film=tt2359704&season=1`, so refreshing or
-opening a shared IMDb link does not require a server rewrite/404 workaround.
+Pages uses URLs like `/YOUR-REPOSITORY/tt2359704`. Season buttons change the
+current view without navigation; selected season is held in history.state.
+Old `?film=…&season=…` and `/film/tt…` links remain readable and are normalized.
+The build includes a custom `404.html` app shell for opening/refreshing clean
+links on Pages. GitHub still returns HTTP 404 for these non-file paths, although
+the application renders the film; this is a static-host limitation for crawlers.
 Service Worker, workers and static assets remain on the frontend origin. APIs,
 subtitle requests, HTTP pieces and server media streams use backendUrl; trackers
 use the corresponding ws/wss URL. Viewer cookies remain on the frontend origin

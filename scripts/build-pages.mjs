@@ -17,4 +17,7 @@ for (const file of await readdir(root)) {
 }
 await writeFile(path.join(out, 'runtime-config.js'), `export default ${JSON.stringify({ backendUrl: backend.origin, staticRouting: true })}\n`)
 await writeFile(path.join(out, '.nojekyll'), '')
+// GitHub Pages has no SPA rewrites: its custom 404 serves the app shell at
+// the requested IMDb URL. Absolute asset paths also work with a trailing slash.
+await copyFile(path.join(out, 'index.html'), path.join(out, '404.html'))
 console.log(`Pages build: ${out}; base ${base}; backend ${backend.origin}`)

@@ -82,7 +82,7 @@ const server = http.createServer(async (req, res) => {
       return entry.proxy.emit('request', req, res)
     }
     if (!['GET', 'HEAD'].includes(req.method)) return json(405, { error: 'Method not allowed' })
-    const relative = url.pathname === '/' || /^\/film\/tt\d{7,10}\/?$/.test(url.pathname) ? '/index.html' : decodeURIComponent(url.pathname)
+    const relative = url.pathname === '/' || /^\/(?:film\/)?tt\d{7,10}\/?$/.test(url.pathname) ? '/index.html' : decodeURIComponent(url.pathname)
     const target = path.resolve(root, '.' + relative)
     if (!target.startsWith(root)) return json(403, { error: 'Forbidden' })
     const bytes = await readFile(target)
