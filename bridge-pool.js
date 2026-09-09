@@ -8,6 +8,8 @@ import parseTorrent from 'parse-torrent'
 import { catalog } from './lib/catalog.js'
 import { createLanProxy } from './lib/lan-proxy.js'
 import { backendAccess, allowedOrigin } from './lib/backend-access.js'
+import { accountsStore } from './lib/accounts-store.js'
+import { accounts } from './lib/accounts.js'
 const host = process.env.TORFILMS_BRIDGE_HOST || '127.0.0.1'
 const port = Number(process.env.TORFILMS_BRIDGE_PORT || process.env.PORT || 18183)
 const ram = Number(process.env.TORFILMS_BRIDGE_RAM_MB || 256)
@@ -15,6 +17,7 @@ const maximum = Number(process.env.TORFILMS_BRIDGE_WORKERS || 4)
 if (!Number.isInteger(maximum) || maximum < 1 || maximum > 8 || !Number.isFinite(ram) || ram < 32 || ram > 2048) throw new Error('Invalid worker / RAM limit')
 const root = fileURLToPath(new URL('./public/p2p/', import.meta.url))
 const library = catalog(process.env.TORFILMS_CATALOG_DIR || fileURLToPath(new URL('./data/', import.meta.url)))
+const identity = accounts(accountsStore(process.env.TORFILMS_CATALOG_DIR || fileURLToPath(new URL('./data/', import.meta.url))), library)
 const workers = new Map()
 const recovered = new Set()
 function getWorker (hash) {
@@ -47,6 +50,8 @@ const server = http.createServer(async (req, res) => {
     if (!backendAccess(req, res)) return
     const url = new URL(req.url, `http://${req.headers.host}`)
     if (url.pathname === '/healthz') return json(200, { ok: true })
+    if (await identity.handle(req, res, url)) return
+    if (url.pathname.startsWith('/catalog/') && !['GET', 'HEAD'].includes(req.method)) await identity.requireUser(req, ['admin', 'moderator'])
     if (await library.handle(req, res, url)) return
     if (url.pathname === '/bridge/config') return json(200, { enabled: true, multiplex: true, memoryMb: ram, maxWorkers: maximum, totalCacheLimitMb: ram * maximum })
     if (url.pathname === '/bridge/state') {
@@ -87,7 +92,7 @@ const server = http.createServer(async (req, res) => {
     if (!target.startsWith(root)) return json(403, { error: 'Forbidden' })
     const bytes = await readFile(target)
     res.writeHead(200, { 'Content-Type': mime.contentType(path.extname(target)) || 'application/octet-stream', 'Cache-Control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : bytes)
-  } catch (e) { json(400, { error: e.message }) }
+  } catch (e) { json(e.status || 400, { error: e.message }) }
 })
 server.on('upgrade', (req, socket, head) => {
   if (!allowedOrigin(req)) return socket.destroy()

@@ -2,11 +2,26 @@ import { tagsOf, seasonsOf, sourcesFor, seasonKey } from './catalog-model.js'
 import { backendFetch, filmUrl, filmId, siteRoot } from './backend.js'
 import { readProgress } from './watch-progress.js'
 import { openSeriesEditor } from './series-editor.js'
+import config from './runtime-config.js'
+import { createCatalogReader } from './catalog-reader.js'
+const viewerOnly = config.viewerOnly !== false
+const accounts = viewerOnly ? null : await import('./accounts-ui.js')
+const canModerate = () => accounts?.canModerate() || false
 const $ = s => document.querySelector(s)
 let movies = [], category = '', editing = null
 let activePlayer = null, playerRequest = 0
+const accountUI = accounts?.mountAccounts()
+const readMovies = createCatalogReader(config, route => api(route, undefined, true))
+async function submitDraft (draft, kind = 'movie') {
+  if (viewerOnly) throw new Error('Этот сайт предназначен только для просмотра')
+  if (!accounts.currentUser) { accountUI.open(); throw new Error('Войдите, чтобы отправить предложение') }
+  if (canModerate()) return api('/catalog/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) })
+  await api('/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, draft }) })
+  $('#notice').textContent = 'Заявка отправлена. Статус доступен в аккаунте.'
+  return null
+}
 const node = (tag, text, className) => { const e = document.createElement(tag); if (text) e.textContent = text; if (className) e.className = className; return e }
-async function api (route, options) { const response = await backendFetch(route, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Сервер недоступен'); return data }
+async function api (route, options, fallback = false) { if (route === '/catalog/movies' && !options?.method && !fallback) return readMovies(); const response = await backendFetch(route, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Сервер недоступен'); return data }
 function cover (movie) { const box = node('div', '', 'cover'); if (movie.poster) { const img = new Image(); img.src = movie.poster; img.alt = movie.title; img.loading = 'lazy'; img.onerror = () => box.replaceChildren(node('span', 'Нет обложки')); box.append(img) } else box.append(node('span', 'Нет обложки')); return box }
 function card (movie) {
   const a = node('a', '', 'card'); a.href = filmUrl(movie.id)
@@ -40,7 +55,7 @@ function render (options = {}) {
     const tagList = node('div', '', 'tag-list')
     for (const tag of tagsOf(movie)) { const link = node('a', tag, 'tag'); link.href = `${siteRoot}?tag=${encodeURIComponent(tag)}`; tagList.append(link) }
     body.append(tagList)
-    const edit = node('button', 'Редактировать'); edit.onclick = () => openEditor(movie)
+    const edit = node('button', canModerate() ? 'Редактировать' : 'Предложить изменение'); edit.onclick = () => openEditor(movie)
     const actions = node('div', '', 'actions')
     const play = node('button', '▶ Смотреть', 'primary'); play.disabled = !playable.sources.length
     const player = node('section'); player.hidden = true; player.setAttribute('aria-label', 'Плеер фильма')
@@ -63,11 +78,14 @@ function render (options = {}) {
     const seriesEdit = node('button', 'Редактор серий/озвучек')
     seriesEdit.onclick = async () => {
       try {
+        if (viewerOnly) return
+        if (!accounts.currentUser) { accountUI.open(); return }
         const fresh = (await api('/catalog/movies')).find(m => m.id === movie.id)
-        openSeriesEditor(fresh, async draft => { await api('/catalog/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) }); movies = await api('/catalog/movies'); render() })
+        openSeriesEditor(fresh, async draft => { await submitDraft(draft, 'episodes'); movies = await api('/catalog/movies'); render() })
       } catch (e) { $('#notice').textContent = e.message }
     }
-    actions.append(play, edit, seriesEdit)
+    actions.append(play)
+    if (!viewerOnly) actions.append(edit, seriesEdit)
     body.append(node('p', movie.description || 'Описание пока не добавлено.', 'description'), actions)
     detail.append(cover({ ...movie, poster: season?.poster || movie.poster }), body); content.append(detail)
     if (seasons.length) {
@@ -103,6 +121,10 @@ function render (options = {}) {
   else { const grid = node('section', '', 'grid'); grid.setAttribute('aria-label', 'Фильмы'); filtered.forEach(m => grid.append(card(m))); content.append(grid) }
 }
 const form = $('#movie-form')
+const requestKind = document.createElement('select')
+requestKind.setAttribute('aria-label', 'Тип предложения')
+for (const [value, label] of [['movie', 'Добавить фильм'], ['description', 'Описание'], ['poster', 'Обложка'], ['audio', 'Озвучка'], ['quality', 'Качество'], ['episodes', 'Серии и сезоны']]) requestKind.append(new Option(label, value))
+form.prepend(requestKind)
 const field = name => form.elements.namedItem(name)
 function addSource (source = {}) {
   if ($('#sources').children.length >= 200) return
@@ -127,7 +149,11 @@ function addSeason (season = {}) {
 }
 const fields = ['id', 'title', 'year', 'kind', 'genre', 'description', 'poster', 'kinopoiskId', 'ageRating', 'endDate']
 function openEditor (movie) {
+  if (viewerOnly) return
+  if (!accounts.currentUser) { accountUI.open(); return }
   editing = movie || null; form.reset(); $('#sources').replaceChildren(); $('#form-error').textContent = ''; $('#editor-title').textContent = movie ? 'Редактировать фильм' : 'Добавить фильм'
+  requestKind.hidden = canModerate(); requestKind.value = movie ? 'description' : 'movie'
+  $('#save').textContent = canModerate() ? 'Сохранить карточку' : 'Отправить заявку'
   for (const key of fields) field(key).value = key === 'poster' && movie?.poster?.startsWith('data:') ? '' : movie?.[key] || (key === 'kind' ? 'Фильм' : '')
   field('tags').value = movie ? tagsOf(movie).join(', ') : ''
   field('isSeries').checked = !!movie?.isSeries || movie?.kind === 'Сериал'
@@ -152,13 +178,18 @@ form.onsubmit = async event => {
     }))
     const poster = $('#poster-file').files[0]; if (poster) { if (!['image/jpeg', 'image/png', 'image/webp'].includes(poster.type)) throw new Error('Обложка должна быть JPEG, PNG или WebP'); input.poster = await fileData(poster, 2 * 1024 ** 2) } else if (!input.poster && editing?.poster?.startsWith('data:')) input.poster = editing.poster
     input.sources = await Promise.all([...$('#sources').children].map(async row => { const source = { ...row.source }; for (const key of ['label', 'magnet', 'fileIndex', 'season']) source[key] = row.querySelector(`[data-field=${key}]`).value; const file = row.querySelector('[type=file]').files[0]; if (file) source.torrentBase64 = (await fileData(file, 3 * 1024 ** 2)).split(',')[1]; return source }))
-    const saved = await api('/catalog/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); location.href = filmUrl(saved.id)
+    const saved = await submitDraft(input, requestKind.value)
+    if (saved) location.href = filmUrl(saved.id)
+    else $('#editor').close()
   } catch (error) { $('#form-error').textContent = error.message || 'Не удалось прочитать файл' } finally { $('#save').disabled = false }
 }
 $('#add').onclick = () => openEditor(); $('#add-source').onclick = () => addSource(); $('#close').onclick = () => $('#editor').close()
+$('#add').hidden = viewerOnly
 $('#add-season').onclick = () => addSeason()
 for (const selector of ['#tag-filter', '#sort']) $(selector).onchange = () => { history.pushState({}, '', siteRoot); render() }
 $('#search').oninput = () => { history.pushState({}, '', siteRoot); render() }
 document.querySelectorAll('[data-kind]').forEach(button => { button.onclick = () => { category = button.dataset.kind; document.querySelectorAll('[data-kind]').forEach(b => b.classList.toggle('active', b === button)); history.pushState({}, '', siteRoot); render() } })
 addEventListener('popstate', render)
+document.addEventListener('torfilms-auth', () => { $('#add').textContent = canModerate() ? '+ Добавить фильм' : '+ Предложить фильм'; if (movies.length) render() })
+document.addEventListener('torfilms-catalog-changed', async () => { movies = await api('/catalog/movies'); render() })
 try { movies = await api('/catalog/movies'); for (const tag of [...new Set(movies.flatMap(tagsOf))].sort((a, b) => a.localeCompare(b, 'ru'))) { const option = node('option', tag); option.value = tag; $('#tag-filter').append(option) }; $('#tag-filter').value = new URLSearchParams(location.search).get('tag') || ''; render() } catch (error) { $('#notice').textContent = `Не удалось загрузить библиотеку: ${error.message}` }

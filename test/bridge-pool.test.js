@@ -7,10 +7,15 @@ import os from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
 import { createLanProxy } from '../lib/lan-proxy.js'
+import { accountsStore } from '../lib/accounts-store.js'
+import { passwordHash } from '../lib/accounts.js'
 
 test('pool concurrently transfers two torrents, routes trackers, reuses workers and enforces RAM slots', { timeout: 40000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'torfilms-pool-test-'))
-  const child = fork(new URL('../bridge.js', import.meta.url), [], { env: { ...process.env, TORFILMS_ALLOWED_ORIGINS: 'https://viewer.github.io', TORFILMS_BRIDGE_PORT: '0', TORFILMS_BRIDGE_WORKERS: '2', TORFILMS_BRIDGE_RAM_MB: '32', TORFILMS_CATALOG_DIR: directory, TORFILMS_BRIDGE_DHT: '0' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+  const credentials = { email: 'test@example.com', password: 'test-admin-password-123' }
+  const hash = await passwordHash(credentials.password)
+  await accountsStore(directory, {}).change(state => state.users.push({ id: 'admin', ...credentials, password: hash, role: 'admin', disabled: false }))
+  const child = fork(new URL('../bridge.js', import.meta.url), [], { env: { ...process.env, TORFILMS_ADMIN_ENABLED: '1', TORFILMS_ALLOWED_ORIGINS: 'https://viewer.github.io', TORFILMS_BRIDGE_PORT: '0', TORFILMS_BRIDGE_WORKERS: '2', TORFILMS_BRIDGE_RAM_MB: '32', TORFILMS_CATALOG_DIR: directory, TORFILMS_BRIDGE_DHT: '0' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
   const seed = fork(new URL('../test-support/seed-worker.js', import.meta.url), [], { windowsHide: true, stdio: ['ignore', 'ignore', 'inherit', 'ipc'] })
   const seedReady = once(seed, 'message', { signal: AbortSignal.timeout(10000) })
   child.stdout.resume(); child.stderr.on('data', b => process.stderr.write(b))
@@ -19,7 +24,9 @@ test('pool concurrently transfers two torrents, routes trackers, reuses workers 
     const [message] = await once(child, 'message', { signal: AbortSignal.timeout(10000) })
     const base = `http://127.0.0.1:${message.port}`
     const json = async route => (await fetch(base + route, { signal: AbortSignal.timeout(5000) })).json()
-    const post = (route, data) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal: AbortSignal.timeout(15000) })
+    const login = await fetch(base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) }).then(r => r.json())
+    const post = (route, data) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${login.token}` }, body: JSON.stringify(data), signal: AbortSignal.timeout(15000) })
+    assert.equal((await fetch(base + '/catalog/movies', { method: 'POST', body: '{}' })).status, 401)
     const payloads = [Buffer.alloc(256 * 1024, 19), Buffer.alloc(256 * 1024, 87)]
     const [fixture] = await seedReady
     const torrents = fixture.torrents

@@ -28,6 +28,8 @@ jobs:
         env:
           TORFILMS_BACKEND_URL: ${{ vars.TORFILMS_BACKEND_URL }}
           TORFILMS_PAGES_BASE: ${{ vars.TORFILMS_PAGES_BASE }}
+          TORFILMS_NEON_DATA_API_URL: ${{ vars.TORFILMS_NEON_DATA_API_URL }}
+          TORFILMS_NEON_ANONYMOUS_TOKEN_URL: ${{ vars.TORFILMS_NEON_ANONYMOUS_TOKEN_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

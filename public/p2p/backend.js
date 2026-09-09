@@ -6,7 +6,13 @@ export function backendUrl (route) {
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash || base.pathname !== '/') throw new Error('backendUrl must be an HTTP(S) origin')
   return new URL(route, base).href
 }
-export const backendFetch = (route, options) => fetch(backendUrl(route), options)
+export function backendFetch (route, options = {}) {
+  const headers = new Headers(options.headers)
+  if (config.viewerOnly === false && /^\/(auth|requests|admin|catalog)(\/|$)/.test(route)) {
+    try { const token = sessionStorage.getItem('torfilms-session'); if (token) headers.set('Authorization', `Bearer ${token}`) } catch {}
+  }
+  return fetch(backendUrl(route), { ...options, headers })
+}
 export function trackerUrl (route = '/tracker') {
   const url = new URL(backendUrl(route), globalThis.location?.origin)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
