@@ -83,7 +83,8 @@ test('pool concurrently transfers two torrents, routes trackers, reuses workers 
     const edit = await post('/catalog/movies', { ...list[0], title: 'Still has torrent' })
     assert.equal(edit.status, 200)
     assert.equal((await edit.json()).sources[0].torrentBase64, movie.sources[0].torrentBase64)
-    for (const route of ['/', '/tt1727587', '/film/tt1727587', '/catalog-app.js', '/catalog.css', '/player.html']) assert.equal((await fetch(base + route)).status, 200)
+    for (const route of ['/', '/tt1727587', '/film/tt1727587', '/catalog-app.js', '/catalog.css']) assert.equal((await fetch(base + route)).status, 200)
+    assert.equal((await fetch(base + '/player.html')).status, 404)
     const victim = (await json('/bridge/state')).workers.find(w => w.infoHash === torrents[0].infoHash)
     process.kill(victim.pid)
     const crashDeadline = Date.now() + 4000

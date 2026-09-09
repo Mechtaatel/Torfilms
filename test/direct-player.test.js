@@ -20,8 +20,8 @@ test('direct playback uses original torrent URL, resumes natively and cleans lis
   assert.equal(errors, 1)
 })
 
-test('both player layouts expose the direct MKV mode', () => {
-  for (const file of ['compact-player.js', 'player.html']) {
+test('embedded player exposes the direct MKV mode', () => {
+  for (const file of ['compact-player.js']) {
     const text = readFileSync(new URL(`../public/p2p/${file}`, import.meta.url), 'utf8')
     assert.match(text, /value="direct">Прямое воспроизведение MKV/)
   }

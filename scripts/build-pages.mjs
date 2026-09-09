@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile, copyFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile, copyFile, unlink } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import runtimeConfig from '../public/p2p/runtime-config.js'
@@ -15,6 +15,10 @@ for (const value of [neonDataApiUrl, neonAnonymousTokenUrl].filter(Boolean)) {
 }
 if (!/^\/(?:[a-zA-Z0-9_.-]+\/)*$/.test(base) || base.includes('..')) throw new Error('Invalid TORFILMS_PAGES_BASE')
 await mkdir(out, { recursive: true })
+// Remove retired standalone-player assets from previous local builds as well.
+for (const file of ['player.html', 'bootstrap.js', 'style.css']) {
+  await unlink(path.join(out, file)).catch(error => { if (error.code !== 'ENOENT') throw error })
+}
 for (const file of await readdir(root)) {
   if (!/\.(js|mjs|css|html|txt)$/.test(file)) continue
   if (file.endsWith('.html')) {

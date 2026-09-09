@@ -8,8 +8,8 @@ test('browser RAM accepts only integer MB from 500 through 2048', () => {
   for (const value of ['', null, undefined, NaN, Infinity, -1, 0, 128, 499, 500.5, 2049, 5000, '2048abc']) assert.throws(() => ramLimitBytes(value), /500.*2048/)
 })
 
-test('both players expose a constrained range instead of unrestricted numeric entry', () => {
-  for (const file of ['compact-player.js', 'player.html']) {
+test('embedded player exposes a constrained range instead of unrestricted numeric entry', () => {
+  for (const file of ['compact-player.js']) {
     const source = readFileSync(new URL(`../public/p2p/${file}`, import.meta.url), 'utf8')
     assert.match(source, /id="ram" type="range" min="500" max="2048" step="1" value="500"/)
   }

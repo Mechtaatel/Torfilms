@@ -92,7 +92,7 @@ const server = http.createServer(async (req, res) => {
     if (!target.startsWith(root)) return json(403, { error: 'Forbidden' })
     const bytes = await readFile(target)
     res.writeHead(200, { 'Content-Type': mime.contentType(path.extname(target)) || 'application/octet-stream', 'Cache-Control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : bytes)
-  } catch (e) { json(e.status || 400, { error: e.message }) }
+  } catch (e) { json(e.code === 'ENOENT' ? 404 : e.status || 400, { error: e.code === 'ENOENT' ? 'Not found' : e.message }) }
 })
 server.on('upgrade', (req, socket, head) => {
   if (!allowedOrigin(req)) return socket.destroy()
