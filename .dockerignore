@@ -1,0 +1,12 @@
+**
+!package.json
+!package-lock.json
+!bridge.js
+!bridge-pool.js
+!bridge-worker.js
+!build-p2p.js
+!lib/
+!lib/**
+!public/
+!public/p2p/
+!public/p2p/**

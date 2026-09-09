@@ -10,7 +10,7 @@ import { createLanProxy } from '../lib/lan-proxy.js'
 
 test('pool concurrently transfers two torrents, routes trackers, reuses workers and enforces RAM slots', { timeout: 40000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'torfilms-pool-test-'))
-  const child = fork(new URL('../bridge.js', import.meta.url), [], { env: { ...process.env, TORFILMS_BRIDGE_PORT: '0', TORFILMS_BRIDGE_WORKERS: '2', TORFILMS_BRIDGE_RAM_MB: '32', TORFILMS_CATALOG_DIR: directory, TORFILMS_BRIDGE_DHT: '0' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+  const child = fork(new URL('../bridge.js', import.meta.url), [], { env: { ...process.env, TORFILMS_ALLOWED_ORIGINS: 'https://viewer.github.io', TORFILMS_BRIDGE_PORT: '0', TORFILMS_BRIDGE_WORKERS: '2', TORFILMS_BRIDGE_RAM_MB: '32', TORFILMS_CATALOG_DIR: directory, TORFILMS_BRIDGE_DHT: '0' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
   const seed = fork(new URL('../test-support/seed-worker.js', import.meta.url), [], { windowsHide: true, stdio: ['ignore', 'ignore', 'inherit', 'ipc'] })
   const seedReady = once(seed, 'message', { signal: AbortSignal.timeout(10000) })
   child.stdout.resume(); child.stderr.on('data', b => process.stderr.write(b))
@@ -39,11 +39,18 @@ test('pool concurrently transfers two torrents, routes trackers, reuses workers 
     const { default: parseTorrent } = await import('parse-torrent')
     assert.equal((await parseTorrent(Buffer.from(metadata.torrentBase64, 'base64'))).infoHash, torrents[0].infoHash)
     const parsed = await parseTorrent(Buffer.from(metadata.torrentBase64, 'base64'))
-    const piece = await fetch(`${base}/bridge/piece/${torrents[0].infoHash}/0`)
+    const piece = await fetch(`${base}/bridge/piece/${torrents[0].infoHash}/0`, { headers: { Origin: 'https://viewer.github.io' } })
     assert.equal(piece.status, 200)
+    assert.equal(piece.headers.get('access-control-allow-origin'), 'https://viewer.github.io')
     assert.equal(piece.headers.get('cache-control'), 'no-store')
     assert.deepEqual(Buffer.from(await piece.arrayBuffer()), payloads[0].subarray(0, parsed.pieceLength))
     const pids = state.workers.map(w => w.pid).sort()
+    const ranged = await fetch(`${base}/bridge/raw/${torrents[0].infoHash}/0`, { headers: { Origin: 'https://viewer.github.io', Range: 'bytes=10-19' } })
+    assert.equal(ranged.status, 206)
+    assert.equal(ranged.headers.get('access-control-allow-origin'), 'https://viewer.github.io')
+    assert.equal((await ranged.arrayBuffer()).byteLength, 10)
+    const remoteWs = new WebSocket(base.replace('http:', 'ws:') + started[0].tracker, { origin: 'https://viewer.github.io' })
+    try { await once(remoteWs, 'open', { signal: AbortSignal.timeout(4000) }) } finally { remoteWs.terminate() }
     assert.notEqual(pids[0], pids[1])
     assert.equal(state.totalCacheLimitMb, 64)
     const received = await Promise.all(torrents.map(t => fetch(`${base}/bridge/raw/${t.infoHash}/0`, { signal: AbortSignal.timeout(12000) }).then(r => r.arrayBuffer())))

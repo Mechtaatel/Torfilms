@@ -7,8 +7,9 @@ import mime from 'mime-types'
 import parseTorrent from 'parse-torrent'
 import { catalog } from './lib/catalog.js'
 import { createLanProxy } from './lib/lan-proxy.js'
+import { backendAccess, allowedOrigin } from './lib/backend-access.js'
 const host = process.env.TORFILMS_BRIDGE_HOST || '127.0.0.1'
-const port = Number(process.env.TORFILMS_BRIDGE_PORT || 18183)
+const port = Number(process.env.TORFILMS_BRIDGE_PORT || process.env.PORT || 18183)
 const ram = Number(process.env.TORFILMS_BRIDGE_RAM_MB || 256)
 const maximum = Number(process.env.TORFILMS_BRIDGE_WORKERS || 4)
 if (!Number.isInteger(maximum) || maximum < 1 || maximum > 8 || !Number.isFinite(ram) || ram < 32 || ram > 2048) throw new Error('Invalid worker / RAM limit')
@@ -43,8 +44,9 @@ async function post (entry, pathname, data) {
 const server = http.createServer(async (req, res) => {
   const json = (code, value) => { if (!res.destroyed) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)) } }
   try {
-    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(403, { error: 'Cross-origin blocked' })
+    if (!backendAccess(req, res)) return
     const url = new URL(req.url, `http://${req.headers.host}`)
+    if (url.pathname === '/healthz') return json(200, { ok: true })
     if (await library.handle(req, res, url)) return
     if (url.pathname === '/bridge/config') return json(200, { enabled: true, multiplex: true, memoryMb: ram, maxWorkers: maximum, totalCacheLimitMb: ram * maximum })
     if (url.pathname === '/bridge/state') {
@@ -88,7 +90,7 @@ const server = http.createServer(async (req, res) => {
   } catch (e) { json(400, { error: e.message }) }
 })
 server.on('upgrade', (req, socket, head) => {
-  if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return socket.destroy()
+  if (!allowedOrigin(req)) return socket.destroy()
   const match = /^\/tracker\/([a-f0-9]{40})$/.exec(req.url)
   const entry = match && workers.get(match[1])
   if (!entry?.proxy) return socket.destroy()

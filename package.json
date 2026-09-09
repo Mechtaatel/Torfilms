@@ -8,6 +8,8 @@
   "scripts": {
     "bridge": "node bridge.js",
     "build:p2p": "node build-p2p.js",
+    "build:pages": "node scripts/build-pages.mjs",
+    "migrate:catalog": "node scripts/migrate-catalog-db.mjs",
     "lan": "node lan.js",
     "test": "node --test",
     "start": "node server.js",
@@ -17,7 +19,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "bittorrent-tracker": "11.2.3",
+    "mediabunny": "1.55.7",
     "memory-chunk-store": "^1.3.5",
     "mime-types": "^3.0.2",
     "parse-torrent": "11.0.24",

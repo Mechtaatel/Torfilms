@@ -16,6 +16,9 @@ test('failed audio discovery retries without touching video and retains selected
   let attempts = 0, retry
   const file = {}
   const context = vm.createContext({ $, catalogueSelection: null, resumeTime: null, bridge: true, selectedFile: file, torrent: { files: [file], infoHash: 'hash' }, disposed: false, trackScan: 0, audioMedia: null, audioActive: false, trackRetry: null,
+    browserProcessing: () => false,
+    directProcessing: () => false,
+    restoreAudio: false, savedAudio: () => null,
     document: { createElement: () => ({}) }, clearTimeout () {}, setTimeout (fn) { retry = fn },
     mediaJson: async () => { if (++attempts === 1) throw new Error('timeout'); return { duration: 100, tracks: [{ index: 0, codec: 'flac' }], externalTracks: [{ fileIndex: 4, title: 'AniDub', external: true }] } },
     renderTimeline () {}, supportsAudio: () => true, applyAudio: () => { throw new Error('Refresh switched the source') }

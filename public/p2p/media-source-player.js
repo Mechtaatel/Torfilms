@@ -5,6 +5,7 @@ export function streamMediaSource (video, { url, duration, origin, position, aud
   const media = new MediaSource(), abort = new AbortController()
   const objectUrl = URL.createObjectURL(media)
   let initializing = true
+  let receivedBytes = 0
   const contains = time => Array.from({ length: video.buffered.length }, (_, i) => i).some(i => time >= video.buffered.start(i) && time < video.buffered.end(i))
   const seeking = () => { if (!initializing && !contains(video.currentTime)) onSeek(video.currentTime) }
   video.addEventListener('seeking', seeking)
@@ -32,13 +33,14 @@ export function streamMediaSource (video, { url, duration, origin, position, aud
         if (video.currentTime > 30 && buffer.buffered.length && buffer.buffered.start(0) < video.currentTime - 30) await change(() => buffer.remove(0, video.currentTime - 20))
         const { value, done } = await reader.read()
         if (done) break
+        receivedBytes += value.byteLength
         await change(() => buffer.appendBuffer(value))
         if (contains(position)) initializing = false
       }
-      if (!abort.signal.aborted && media.readyState === 'open') { media.endOfStream(); media.duration = Math.max(duration, media.duration) }
+      if (!abort.signal.aborted && media.readyState === 'open') media.endOfStream()
     } catch (error) { if (!abort.signal.aborted) onError(error) }
   }, { once: true })
   video.src = objectUrl
   video.load()
-  return { destroy () { abort.abort(); video.removeEventListener('seeking', seeking); URL.revokeObjectURL(objectUrl) } }
+  return { get receivedBytes () { return receivedBytes }, destroy () { abort.abort(); video.removeEventListener('seeking', seeking); URL.revokeObjectURL(objectUrl) } }
 }

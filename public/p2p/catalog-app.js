@@ -1,26 +1,27 @@
-import { tagsOf, seasonsOf, sourcesFor } from './catalog-model.js'
+import { tagsOf, seasonsOf, sourcesFor, seasonKey } from './catalog-model.js'
+import { backendFetch, filmUrl, siteRoot } from './backend.js'
 import { readProgress } from './watch-progress.js'
 import { openSeriesEditor } from './series-editor.js'
 const $ = s => document.querySelector(s)
 let movies = [], category = '', editing = null
 let activePlayer = null, playerRequest = 0
 const node = (tag, text, className) => { const e = document.createElement(tag); if (text) e.textContent = text; if (className) e.className = className; return e }
-async function api (route, options) { const response = await fetch(route, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Сервер недоступен'); return data }
+async function api (route, options) { const response = await backendFetch(route, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Сервер недоступен'); return data }
 function cover (movie) { const box = node('div', '', 'cover'); if (movie.poster) { const img = new Image(); img.src = movie.poster; img.alt = movie.title; img.loading = 'lazy'; img.onerror = () => box.replaceChildren(node('span', 'Нет обложки')); box.append(img) } else box.append(node('span', 'Нет обложки')); return box }
-function card (movie) { const a = node('a', '', 'card'); a.href = `/film/${movie.id}`; a.append(cover(movie), node('h3', movie.title), node('small', [movie.year, movie.kind, movie.genre].filter(Boolean).join(' · '))); return a }
+function card (movie) { const a = node('a', '', 'card'); a.href = filmUrl(movie.id); a.append(cover(movie), node('h3', movie.title), node('small', [movie.year, movie.kind, movie.genre].filter(Boolean).join(' · '))); return a }
 function render () {
   ++playerRequest; activePlayer?.destroy(); activePlayer = null
   const content = $('#content'); content.replaceChildren()
-  const id = /^\/film\/(tt\d{7,10})\/?$/.exec(location.pathname)?.[1]
+  const id = /\/film\/(tt\d{7,10})\/?$/.exec(location.pathname)?.[1] || new URLSearchParams(location.search).get('film')
   if (id) {
     const movie = movies.find(m => m.id === id)
     if (!movie) { content.append(node('h1', 'Фильм не найден'), node('p', 'Карточку с таким IMDb ID ещё не добавили.')); return }
     document.title = `${movie.title} — Torfilms`
     const seasons = seasonsOf(movie)
-    const chosenSeason = Number(new URLSearchParams(location.search).get('season') ?? readProgress(id)?.season)
-    const season = seasons.find(s => s.number === chosenSeason) || seasons[0]
+    const chosenSeason = new URLSearchParams(location.search).get('season') ?? readProgress(id)?.season
+    const season = seasons.find(s => seasonKey(s.number) === seasonKey(chosenSeason)) || seasons[0]
     const playable = { ...movie, activeSeason: season?.number, sources: sourcesFor(movie, season?.number) }
-    const back = node('a', '← В библиотеку', 'muted'); back.href = '/'; content.append(back)
+    const back = node('a', '← В библиотеку', 'muted'); back.href = siteRoot; content.append(back)
     const detail = node('section', '', 'detail'); detail.style.marginTop = '24px'
     const body = node('div', '', 'body'); body.append(node('div', movie.kind, 'eyebrow'), node('h1', movie.title), node('p', [movie.year, movie.genre].filter(Boolean).join(' · '), 'muted'))
     const imdb = node('a', `IMDb · ${movie.id}`); imdb.href = `https://www.imdb.com/title/${movie.id}/`; imdb.target = '_blank'; imdb.rel = 'noopener'; body.append(imdb)
@@ -29,7 +30,7 @@ function render () {
     if (seasons.length || movie.isSeries || movie.kind === 'Сериал') meta.append(node('span', movie.completed ? ` · Завершён${movie.endDate ? ' · Дата окончания: ' + movie.endDate.split('-').reverse().join('.') : ' · Дата окончания не указана'}` : ' · Дата окончания не указана'))
     body.append(meta)
     const tagList = node('div', '', 'tag-list')
-    for (const tag of tagsOf(movie)) { const link = node('a', tag, 'tag'); link.href = `/?tag=${encodeURIComponent(tag)}`; tagList.append(link) }
+    for (const tag of tagsOf(movie)) { const link = node('a', tag, 'tag'); link.href = `${siteRoot}?tag=${encodeURIComponent(tag)}`; tagList.append(link) }
     body.append(tagList)
     const edit = node('button', 'Редактировать'); edit.onclick = () => openEditor(movie)
     const actions = node('div', '', 'actions')
@@ -63,7 +64,7 @@ function render () {
     detail.append(cover({ ...movie, poster: season?.poster || movie.poster }), body); content.append(detail)
     if (seasons.length) {
       const strip = node('section', '', 'season-list'); strip.setAttribute('aria-label', 'Сезоны сериала')
-      for (const item of seasons) { const link = node('a', '', `season-card${item.number === season.number ? ' selected' : ''}`); link.href = `/film/${movie.id}?season=${item.number}`; if (item.number === season.number) link.setAttribute('aria-current', 'page'); link.append(cover({ title: item.title, poster: item.poster || movie.poster }), node('strong', item.title)); strip.append(link) }
+      for (const item of seasons) { const link = node('a', '', `season-card${item.number === season.number ? ' selected' : ''}`); link.href = filmUrl(movie.id, item.number); if (item.number === season.number) link.setAttribute('aria-current', 'page'); link.append(cover({ title: item.title, poster: item.poster || movie.poster }), node('strong', item.title)); strip.append(link) }
       content.append(node('h2', 'Сезоны'), strip)
     }
     content.append(player)
@@ -88,7 +89,7 @@ function addSource (source = {}) {
   if ($('#sources').children.length >= 200) return
   const row = node('fieldset'); row.source = source; row.append(node('legend', 'Версия фильма'))
   if (source.episodes?.length) row.append(node('p', `Видео: ${source.episodes.filter(e => !e.excluded).length}. Названия и сезоны — в отдельном «Редакторе серий/озвучек».`))
-  for (const [name, title, value] of [['label', 'Качество / версия', source.label], ['season', 'Номер сезона (для сериалов)', source.season ?? 1], ['magnet', 'Magnet-ссылка', source.magnet], ['fileIndex', 'Начальный индекс видео (серии доступны в плеере)', source.fileIndex ?? 0]]) { const label = node('label', title), input = node('input'); input.dataset.field = name; input.value = value ?? ''; input.type = ['fileIndex', 'season'].includes(name) ? 'number' : 'text'; if (input.type === 'number') { input.min = '0'; input.step = '1' } if (name === 'label') input.required = true; label.append(input); row.append(label) }
+  for (const [name, title, value] of [['label', 'Качество / версия', source.label], ['season', 'Сезон по умолчанию', source.season ?? 1], ['magnet', 'Magnet-ссылка', source.magnet], ['fileIndex', 'Начальный индекс видео (серии доступны в плеере)', source.fileIndex ?? 0]]) { const label = node('label', title), input = node('input'); input.dataset.field = name; input.value = value ?? ''; input.type = name === 'fileIndex' ? 'number' : 'text'; if (input.type === 'number') { input.min = '0'; input.step = '1' } if (name === 'label') input.required = true; label.append(input); row.append(label) }
   const upload = node('input'); upload.type = 'file'; upload.accept = '.torrent'; upload.dataset.field = 'torrent'
   const label = node('label', source.hasTorrent || source.torrentBase64 ? '.torrent сохранён. Выберите файл, чтобы заменить.' : 'Или .torrent-файл (до 3 МБ)'); label.append(upload)
   row.querySelector('[data-field=magnet]').oninput = () => { row.source = { ...row.source, episodes: [], audioLabels: {}, hasTorrent: false, torrentBase64: '' }; row.querySelector('details')?.remove() }
@@ -99,8 +100,8 @@ function addSeason (season = {}) {
   if ($('#seasons').children.length >= 100) return
   field('isSeries').checked = true
   const row = node('fieldset'); row.season = season; row.append(node('legend', 'Сезон'))
-  for (const [key, title, value] of [['number', 'Номер сезона', season.number ?? $('#seasons').children.length + 1], ['title', 'Название сезона', season.title || ''], ['poster', 'Обложка: HTTPS-ссылка', season.poster?.startsWith('data:') ? '' : season.poster || '']]) {
-    const label = node('label', title), input = node('input'); input.dataset.field = key; input.value = value; input.type = key === 'number' ? 'number' : key === 'poster' ? 'url' : 'text'; if (key === 'number') { input.min = '0'; input.max = '999'; input.required = true }; label.append(input); row.append(label)
+  for (const [key, title, value] of [['number', 'Идентификатор сезона: число или название', season.number ?? $('#seasons').children.length + 1], ['title', 'Название сезона', season.title || ''], ['poster', 'Обложка: HTTPS-ссылка', season.poster?.startsWith('data:') ? '' : season.poster || '']]) {
+    const label = node('label', title), input = node('input'); input.dataset.field = key; input.value = value; input.type = key === 'poster' ? 'url' : 'text'; if (key === 'number') { input.maxLength = 80; input.required = true }; label.append(input); row.append(label)
   }
   const upload = node('input'); upload.type = 'file'; upload.accept = 'image/jpeg,image/png,image/webp'; const label = node('label', 'Или обложка с устройства (до 2 МБ)'); label.append(upload); row.append(label)
   const remove = node('button', 'Убрать оформление сезона'); remove.type = 'button'; remove.onclick = () => row.remove(); row.append(remove); $('#seasons').append(row)
@@ -132,13 +133,13 @@ form.onsubmit = async event => {
     }))
     const poster = $('#poster-file').files[0]; if (poster) { if (!['image/jpeg', 'image/png', 'image/webp'].includes(poster.type)) throw new Error('Обложка должна быть JPEG, PNG или WebP'); input.poster = await fileData(poster, 2 * 1024 ** 2) } else if (!input.poster && editing?.poster?.startsWith('data:')) input.poster = editing.poster
     input.sources = await Promise.all([...$('#sources').children].map(async row => { const source = { ...row.source }; for (const key of ['label', 'magnet', 'fileIndex', 'season']) source[key] = row.querySelector(`[data-field=${key}]`).value; const file = row.querySelector('[type=file]').files[0]; if (file) source.torrentBase64 = (await fileData(file, 3 * 1024 ** 2)).split(',')[1]; return source }))
-    const saved = await api('/catalog/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); location.href = `/film/${saved.id}`
+    const saved = await api('/catalog/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); location.href = filmUrl(saved.id)
   } catch (error) { $('#form-error').textContent = error.message || 'Не удалось прочитать файл' } finally { $('#save').disabled = false }
 }
 $('#add').onclick = () => openEditor(); $('#add-source').onclick = () => addSource(); $('#close').onclick = () => $('#editor').close()
 $('#add-season').onclick = () => addSeason()
-for (const selector of ['#tag-filter', '#sort']) $(selector).onchange = () => { if (location.pathname !== '/') history.pushState({}, '', '/'); render() }
-$('#search').oninput = () => { if (location.pathname !== '/') history.pushState({}, '', '/'); render() }
-document.querySelectorAll('[data-kind]').forEach(button => { button.onclick = () => { category = button.dataset.kind; document.querySelectorAll('[data-kind]').forEach(b => b.classList.toggle('active', b === button)); if (location.pathname !== '/') history.pushState({}, '', '/'); render() } })
+for (const selector of ['#tag-filter', '#sort']) $(selector).onchange = () => { history.pushState({}, '', siteRoot); render() }
+$('#search').oninput = () => { history.pushState({}, '', siteRoot); render() }
+document.querySelectorAll('[data-kind]').forEach(button => { button.onclick = () => { category = button.dataset.kind; document.querySelectorAll('[data-kind]').forEach(b => b.classList.toggle('active', b === button)); history.pushState({}, '', siteRoot); render() } })
 addEventListener('popstate', render)
 try { movies = await api('/catalog/movies'); for (const tag of [...new Set(movies.flatMap(tagsOf))].sort((a, b) => a.localeCompare(b, 'ru'))) { const option = node('option', tag); option.value = tag; $('#tag-filter').append(option) }; $('#tag-filter').value = new URLSearchParams(location.search).get('tag') || ''; render() } catch (error) { $('#notice').textContent = `Не удалось загрузить библиотеку: ${error.message}` }

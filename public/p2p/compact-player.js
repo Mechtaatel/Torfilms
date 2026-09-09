@@ -9,6 +9,7 @@ export function createCompactPlayer (host, movie, quality) {
     <div class="player-tools"><div id="quality-slot"></div><label class="episode-choice">Серия / видеофайл <select id="episode" disabled><option>Получаю список…</option></select></label><button id="stop" type="button">Остановить</button></div>
     <p id="status" role="status" aria-live="polite"></p>
     <details class="player-settings"><summary>Настройки плеера</summary>
+      <label>Обработка контейнера <select id="processing-mode"><option value="browser">На этом устройстве · без перекодирования (экспериментально)</option><option value="bridge">На мосте · совместимость кодеков</option><option value="direct">Прямое воспроизведение MKV</option></select></label>
       <section id="audio-panel" hidden>
         <div class="player-tools"><label>Озвучка <select id="audio-track"></select></label><button id="audio-refresh" type="button">Обновить озвучки</button><button id="audio-original" type="button">Исходный звук</button></div>
         <p id="audio-mode" class="muted"></p>
@@ -16,7 +17,7 @@ export function createCompactPlayer (host, movie, quality) {
       </section>
       <div class="player-tools"><label>RAM-кеш (500–2048 МБ) <input id="ram" type="range" min="500" max="2048" step="1" value="500"><output id="ram-value" for="ram">500 МБ</output></label><label>Отдача, КиБ/с <input id="upload" type="number" min="1" max="10240" value="512"></label><button id="apply-settings" type="button">Применить и переподключить</button></div>
       <p class="muted">Изменение лимитов переподключает видео с начала. Кеш используется на этом устройстве; мост имеет отдельный кеш. IP-адрес виден участникам P2P.</p>
-      <details><summary>Файлы и статистика</summary><div id="files"></div><pre id="stats"></pre></details>
+      <details><summary>Статистика</summary><pre id="stats" aria-live="off"></pre></details>
     </details>
     <form id="join" hidden><input id="magnet" required><button type="submit">Подключить</button></form><input id="seed" type="file" hidden>
   `

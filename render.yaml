@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: torfilms-backend
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: TORFILMS_BRIDGE_HOST
+        value: 0.0.0.0
+      - key: TORFILMS_ALLOWED_ORIGINS
+        sync: false
+      - key: TORFILMS_CATALOG_READONLY
+        value: '1'
+      - key: TORFILMS_BRIDGE_NATIVE_RTC
+        value: '0'
+      - key: TORFILMS_BRIDGE_WORKERS
+        value: '1'
+      - key: TORFILMS_BRIDGE_RAM_MB
+        value: '128'
+      - key: TORFILMS_CATALOG_DIR
+        value: /var/data/torfilms
+      - key: DATABASE_URL
+        sync: false

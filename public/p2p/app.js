@@ -1,14 +1,26 @@
 import { RamStore, installReader } from './ram-store.js'
+import { backendFetch, backendUrl, trackerUrl } from './backend.js'
 import WebTorrent from './webtorrent.min.js'
-import { videoFiles } from './catalog-model.js'
+import { videoFiles, seasonKey } from './catalog-model.js'
 import { createPieceFallback } from './piece-fallback.js'
 import { ramLimitBytes } from './ram-limits.js'
 import { streamMediaSource } from './media-source-player.js'
 import { readProgress, writeProgress } from './watch-progress.js'
+import { readRamSetting, saveRamSetting } from './viewer-settings.js'
+import { RetainedRamPool } from './retained-ram.js'
+import { publicTrackers, peerTrackers } from './peer-trackers.js'
+import { createPlayerStats } from './player-stats.js'
+import { startLocalRemux } from './local-remux.js'
+import { startDirectPlayback } from './direct-player.js'
+import { readProcessing, saveProcessing, saveAudioPreference, preferredAudio } from './playback-preferences.js'
+import { externalAudioFiles } from './external-audio.js'
+const viewerCache = new RetainedRamPool()
 export function mountPlayer (root, { movie: initialMovie, quality: initialQuality, compact = false } = {}) {
 const $ = s => root.querySelector(s)
+if ($('#processing-mode')) $('#processing-mode').value = readProcessing()
+$('#ram').value = String(readRamSetting())
 const updateRamLabel = () => { if ($('#ram-value')) $('#ram-value').textContent = `${$('#ram').value} МБ` }
-$('#ram').oninput = updateRamLabel
+$('#ram').oninput = () => { updateRamLabel(); saveRamSetting($('#ram').value) }
 updateRamLabel()
 let disposed = false
 let client, torrent, store, generation = 0
@@ -19,6 +31,13 @@ let joinQueue = Promise.resolve(), joinRequest = 0, catalogueRequest = 0, joinin
 let selectedFile = null, audioMedia = null, audioOffset = 0, audioActive = false, audioRequest = 0, audioTimer
 let trackScan = 0, trackRetry
 let mediaStream = null
+const directProcessing = () => $('#processing-mode')?.value === 'direct'
+const browserProcessing = () => !directProcessing() && $('#processing-mode')?.value !== 'bridge'
+const preferenceContext = () => ({ files: torrent?.files, labels: catalogueSelection?.audioLabels, index: torrent?.files.indexOf(selectedFile) })
+const preferenceScope = () => catalogueSelection?.movie || torrent?.infoHash
+const savedAudio = tracks => preferredAudio(preferenceScope(), tracks, preferenceContext())
+function rememberAudio () { saveAudioPreference(preferenceScope(), audioMedia?.tracks.find(t => t.id === $('#audio-track').value), preferenceContext()) }
+let restoreAudio = false
 let resumeTime = null, lastProgress = 0, subtitleAbort, subtitleUrl, subtitleElement, watchSource
 function saveProgress () {
   if (!selectedFile || !torrent || !watchSource || timelineTarget !== null || resumeTime !== null) return
@@ -39,7 +58,7 @@ async function applySubtitles () {
   const controller = subtitleAbort = new AbortController()
   try {
     $('#subtitle-status').textContent = 'Загружаю субтитры…'
-    const response = await fetch(`/bridge/subtitles/${audioMedia.hash}/${audioMedia.index}?file=${id}`, { signal: controller.signal })
+    const response = await backendFetch(`/bridge/subtitles/${audioMedia.hash}/${audioMedia.index}?file=${id}`, { signal: controller.signal })
     if (!response.ok) throw new Error((await response.json()).error || 'Ошибка субтитров')
     const text = await response.text()
     if (controller.signal.aborted) return
@@ -67,7 +86,7 @@ function renderTimeline () {
 }
 const audioTypes = { aac: 'audio/mp4; codecs="mp4a.40.2"', mp3: 'audio/mp4; codecs="mp4a.6B"', opus: 'audio/mp4; codecs="opus"', flac: 'audio/mp4; codecs="fLaC"' }
 async function mediaJson (route) {
-  const response = await fetch(route)
+  const response = await backendFetch(route)
   const data = await response.json()
   if (!response.ok) throw new Error(data.error || 'Ошибка аудиопотока')
   return data
@@ -79,16 +98,58 @@ async function chooseFile (file, value) {
   ++audioRequest; ++trackScan; clearTimeout(trackRetry)
   clearTimeout(audioTimer)
   selectedFile = file; audioMedia = null; audioActive = false; audioOffset = 0
+  restoreAudio = true
   watchSource = catalogueSelection
   timelineDragging = false; timelineTarget = null; renderTimeline()
   if ($('#episode')) $('#episode').value = String(value.files.indexOf(file))
   $('#audio-panel').hidden = true
+  $('#audio-refresh').disabled = directProcessing()
+  $('#audio-original').disabled = directProcessing()
+  if (directProcessing()) {
+    const position = resumeTime ?? 0; resumeTime = null
+    $('#audio-panel').hidden = false
+    const index = value.files.indexOf(file)
+    const external = externalAudioFiles(value.files, index).map(t => ({ ...t, id: `file:${t.fileIndex}` }))
+    const updateTracks = native => {
+      const previous = $('#audio-track').value
+      const tracks = [...(native.length ? native : [{ id: 'original', title: 'Исходная озвучка (браузер не раскрывает встроенные дорожки)' }]), ...external]
+      audioMedia = { duration: $('video').duration, tracks }
+      $('#audio-track').replaceChildren()
+      for (const track of tracks) $('#audio-track').append(new Option([catalogueSelection?.audioLabels?.[track.id] || track.title, track.language, track.external ? 'Внешняя озвучка' : ''].filter(Boolean).join(' · '), track.id))
+      if (tracks.some(t => t.id === previous)) $('#audio-track').value = previous
+      $('#audio-track').disabled = tracks.length < 2
+    }
+    updateTracks([])
+    $('#audio-mode').textContent = 'Исходный MKV без перепаковки видео. Можно выбрать внешнюю озвучку; встроенные дорожки доступны, если браузер раскрывает их список.'
+    status('Открываю исходный MKV…')
+    mediaStream = startDirectPlayback($('video'), file, {
+      position, torrent: value, fileIndex: index, onTracks: updateTracks,
+      onReady: () => {
+        audioMedia.duration = $('video').duration; renderTimeline()
+        const preferred = savedAudio(audioMedia.tracks)
+        if (restoreAudio && preferred) { restoreAudio = false; $('#audio-track').value = preferred.id; applyAudio() }
+      },
+      onAudioReady: () => { $('#audio-mode').textContent = 'Выбранная озвучка подключена. Видео — исходный MKV без перепаковки.' },
+      onError: error => { $('#audio-mode').textContent = error.message; status(error.message) }
+    })
+    return
+  }
+  if (browserProcessing()) {
+    const position = resumeTime ?? 0; resumeTime = null
+    startBrowserPlayback(position, true)
+    return
+  }
   file.streamTo($('video'))
   $('video').play().catch(() => status('Нажмите Play'))
   if (!bridge) return
   await refreshTracks(true)
 }
 async function refreshTracks (initial = false) {
+  if (directProcessing()) return
+  if (browserProcessing()) {
+    if (selectedFile && torrent) startBrowserPlayback($('video').currentTime || 0, !$('video').paused)
+    return
+  }
   if (!bridge || !selectedFile || !torrent || disposed) return
   clearTimeout(trackRetry)
   const file = selectedFile, value = torrent, scan = ++trackScan
@@ -118,10 +179,13 @@ async function refreshTracks (initial = false) {
       $('#audio-track').append(option)
     }
     if (data.tracks.some(t => t.id === previous)) $('#audio-track').value = previous
+    const preferred = restoreAudio && savedAudio(data.tracks)
+    if (preferred) $('#audio-track').value = preferred.id
     $('#audio-track').disabled = !data.tracks.length
     $('#audio-seek').max = String(data.duration)
     $('#audio-mode').textContent = data.tracks.length ? 'Список озвучек обновлён. Выберите нужную дорожку.' : 'Озвучки не найдены. Можно повторить поиск без перезапуска видео.'
-    if (!data.pending && resumeTime !== null && data.tracks.length) { const target = Math.min(resumeTime, Math.max(0, data.duration - 1)); resumeTime = null; await applyAudio(target, true) }
+    if (!data.pending && preferred) { restoreAudio = false; const target = resumeTime ?? $('video').currentTime; resumeTime = null; await applyAudio(target, true) }
+    else if (!data.pending && resumeTime !== null && data.tracks.length) { const target = Math.min(resumeTime, Math.max(0, data.duration - 1)); resumeTime = null; await applyAudio(target, true) }
     else if (data.pending) trackRetry = setTimeout(() => refreshTracks(), 1000)
     else if (initial && !audioActive && data.tracks.length && !supportsAudio(data.tracks[0])) await applyAudio()
   } catch (e) {
@@ -132,8 +196,69 @@ async function refreshTracks (initial = false) {
 }
 if ($('#audio-refresh')) $('#audio-refresh').onclick = () => refreshTracks()
 function supportsAudio (track) { return Boolean(audioTypes[track.codec] && $('video').canPlayType(audioTypes[track.codec])) }
+function startBrowserPlayback (position = 0, resume = true, track = null) {
+  if (!torrent || !selectedFile || disposed) return
+  const request = ++audioRequest, value = torrent, file = selectedFile, index = value.files.indexOf(file)
+  clearTimeout(audioTimer); clearTimeout(trackRetry); ++trackScan
+  mediaStream?.destroy(); mediaStream = null
+  $('video').pause(); $('video').removeAttribute('src'); $('video').load()
+  audioActive = true; audioOffset = 0; timelineTarget = position
+  $('#audio-panel').hidden = false
+  $('#audio-mode').textContent = 'Разбираю контейнер на этом устройстве. Мост передаёт только исходные torrent-куски…'
+  const current = () => !disposed && request === audioRequest && selectedFile === file && torrent === value
+  try {
+    mediaStream = startLocalRemux($('video'), {
+      torrent: value, fileIndex: index, track, position, resume,
+      duration: audioMedia?.duration || catalogueSelection?.audioMetadata?.[index]?.duration,
+      onMetadata: data => {
+        if (!current()) return
+        const external = externalAudioFiles(value.files, index).map(t => ({ ...t, id: `file:${t.fileIndex}` }))
+        audioMedia = { hash: value.infoHash, index, duration: data.duration, tracks: [...data.tracks, ...external], subtitles: externalAudioFiles(value.files, index, true) }
+        if (!track && restoreAudio) { track = savedAudio(audioMedia.tracks); restoreAudio = false }
+        $('#audio-track').replaceChildren()
+        for (const t of audioMedia.tracks) {
+          const title = catalogueSelection?.audioLabels?.[t.external ? `file:${t.fileIndex}` : `${index}:${t.index}`] || t.title
+          $('#audio-track').append(new Option([title, t.language, t.codec, t.external ? 'Внешний файл' : ''].filter(Boolean).join(' · '), t.id))
+        }
+        if (track && audioMedia.tracks.some(t => t.id === track.id)) $('#audio-track').value = track.id
+        $('#audio-track').disabled = !audioMedia.tracks.length
+        if ($('#subtitle-track')) {
+          const selected = $('#subtitle-track').value
+          $('#subtitle-track').replaceChildren(new Option('Выключены', ''))
+          for (const sub of audioMedia.subtitles) $('#subtitle-track').append(new Option(sub.title, String(sub.fileIndex)))
+          if (audioMedia.subtitles.some(s => String(s.fileIndex) === selected)) $('#subtitle-track').value = selected
+        }
+        renderTimeline()
+        return track
+      },
+      onSeek: time => { if (current()) applyAudio(time) },
+      onReady: () => {
+        if (!current()) return
+        timelineTarget = null; renderTimeline()
+        $('#audio-mode').textContent = 'Перепаковка на этом устройстве. Видео и выбранный звук без перекодирования. Исходные куски доступны WebRTC-пирам.'
+        if ($('#subtitle-track')?.value) applySubtitles()
+      },
+      onError: error => {
+        if (!current()) return
+        timelineTarget = null; renderTimeline()
+        $('#audio-mode').textContent = `Локальный режим: ${error.message}. Автоматическое преобразование на мосте отключено.`
+        status('Можно выбрать другую озвучку или вручную включить обработку на мосте в настройках.')
+      }
+    })
+  } catch (error) { timelineTarget = null; renderTimeline(); $('#audio-mode').textContent = error.message }
+}
 async function applyAudio (position, resume) {
+  if (directProcessing()) {
+    $('#audio-mode').textContent = 'Подключаю выбранную озвучку, видеопоток остаётся исходным MKV…'
+    mediaStream?.selectAudio(audioMedia?.tracks.find(t => t.id === $('#audio-track').value))
+    return
+  }
   if (!audioMedia) return
+  if (browserProcessing()) {
+    const track = audioMedia.tracks.find(t => t.id === $('#audio-track').value)
+    startBrowserPlayback(position ?? $('video').currentTime, resume ?? !$('video').paused, track)
+    return
+  }
   const request = ++audioRequest
   clearTimeout(audioTimer)
   const video = $('video')
@@ -156,7 +281,7 @@ async function applyAudio (position, resume) {
     if (request !== audioRequest) return
     video.pause()
     mediaStream?.destroy(); mediaStream = null
-    const url = `/bridge/audio/${base}?track=${track.index}&copy=${copy ? 1 : 0}&start=${position}${track.external ? `&audioFile=${track.fileIndex}` : ''}`
+    const url = backendUrl(`/bridge/audio/${base}?track=${track.index}&copy=${copy ? 1 : 0}&start=${position}${track.external ? `&audioFile=${track.fileIndex}` : ''}`)
     mediaStream = streamMediaSource(video, { url, duration: audioMedia.duration, origin: plan.origin, position, audioCodec: copy ? ({ aac: 'mp4a.40.2', mp3: 'mp4a.6B', opus: 'opus', flac: 'fLaC' }[track.codec]) : 'mp4a.40.2',
       onSeek: time => applyAudio(time), onError: error => { if (request === audioRequest) $('#audio-mode').textContent = error.message }
     })
@@ -181,8 +306,20 @@ async function applyAudio (position, resume) {
     $('#audio-mode').textContent = copy ? 'Аудио и видео без перекодирования; выбранная озвучка в MP4-потоке с моста по HTTPS (не P2P).' : 'Звук → AAC стерео, видео без перекодирования. Поток с моста по HTTPS (не P2P).'
   } catch (e) { if (request === audioRequest) { timelineTarget = null; renderTimeline(); $('#audio-mode').textContent = `Озвучка не применена: ${e.message}. Исходный поток не изменён.`; status(e.message) } }
 }
-$('#audio-track').onchange = () => applyAudio()
-$('#audio-original').onclick = () => { mediaStream?.destroy(); mediaStream = null; ++audioRequest; clearTimeout(audioTimer); audioActive = false; audioOffset = 0; selectedFile?.streamTo($('video')); $('#audio-mode').textContent = 'Исходный P2P-поток с начала. Кодеки не изменяются.' }
+$('#audio-track').onchange = () => { restoreAudio = false; rememberAudio(); applyAudio() }
+$('#audio-original').onclick = () => {
+  restoreAudio = false
+  const original = audioMedia?.tracks.find(t => !t.external)
+  if (original) { $('#audio-track').value = original.id; rememberAudio() }
+  if (browserProcessing()) { startBrowserPlayback($('video').currentTime || 0, !$('video').paused); return }
+  mediaStream?.destroy(); mediaStream = null; ++audioRequest; clearTimeout(audioTimer); audioActive = false; audioOffset = 0; selectedFile?.streamTo($('video')); $('#audio-mode').textContent = 'Исходный P2P-поток с начала. Кодеки не изменяются.'
+}
+if ($('#processing-mode')) $('#processing-mode').onchange = () => {
+  saveProcessing($('#processing-mode').value)
+  if (!selectedFile || !torrent) return
+  resumeTime = $('video').currentTime + audioOffset
+  chooseFile(selectedFile, torrent)
+}
 $('#audio-seek').oninput = () => { timelineDragging = true; renderTimeline() }
 $('#audio-seek').onchange = () => {
   const target = Number($('#audio-seek').value)
@@ -197,12 +334,12 @@ $('video').addEventListener('pause', saveProgress)
 globalThis.addEventListener?.('pagehide', saveProgress)
 const viewer = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
 async function bridgePost (route, data) {
-  const response = await fetch(`/bridge/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  const response = await backendFetch(`/bridge/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
   const result = await response.json()
   if (!response.ok) throw new Error(result.error || 'Bridge error')
   return result
 }
-const trackers = ['wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xyz']
+const trackers = publicTrackers
 const status = text => { if (!disposed) $('#status').textContent = text }
 $('video').addEventListener('playing', () => status('Воспроизведение'))
 async function stop () {
@@ -212,16 +349,17 @@ async function stop () {
   ++audioRequest; clearTimeout(audioTimer); audioMedia = null; selectedFile = null; $('#audio-panel').hidden = true
   generation++
   $('video').pause(); $('video').removeAttribute('src'); $('video').load()
-  $('#files').replaceChildren()
+  $('#files')?.replaceChildren()
   if ($('#episode')) { $('#episode').replaceChildren(); $('#episode').disabled = true }
   const old = client; client = torrent = store = null
   httpBytes = 0
   if (old) await new Promise(r => old.destroy(r))
-  status('Остановлено. RAM-кеш очищен.')
+  status('Остановлено. RAM-куски сохранены до вытеснения или перезагрузки страницы.')
 }
 async function prepare () {
   // Validate independently of HTML attributes, before stopping a working player.
   const limit = ramLimitBytes($('#ram').value)
+  saveRamSetting($('#ram').value); viewerCache.configure(limit)
   const rate = Number($('#upload').value)
   if (!Number.isFinite(rate) || rate < 1 || rate > 10240) throw new Error('Отдача: 1–10240 КиБ/с')
   await stop()
@@ -234,10 +372,10 @@ async function prepare () {
   if (worker.state !== 'activated') await new Promise(resolve => worker.addEventListener('statechange', () => { if (worker.state === 'activated') resolve() }))
   client.createServer({ controller: registration })
   bridge = false
-  try { bridge = (await (await fetch('/bridge/config')).json()).enabled === true } catch {}
+  try { bridge = (await (await backendFetch('/bridge/config')).json()).enabled === true } catch {}
   if (bridge) status(compact ? 'Подключаю раздачу…' : 'Hybrid-мост включён: его RAM-кеш находится на компьютере-сервере, ваш кеш — в этом браузере.')
-  const announce = bridge ? [`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/tracker`] : trackers
-  return { limit, options: { announce, store: RamStore, storeCacheSlots: 0, deselect: true, storeOpts: { limit, onStore: value => { store = value } } } }
+  const announce = bridge ? [trackerUrl(), ...trackers] : trackers
+  return { limit, options: { announce, store: RamStore, storeCacheSlots: 0, deselect: true, storeOpts: { limit, pool: viewerCache, onStore: value => { store = value } } } }
 }
 function ready (value, limit) {
   torrent = value
@@ -247,8 +385,9 @@ function ready (value, limit) {
   const fallback = bridge ? createPieceFallback(value, limit, count => { httpBytes += count }) : null
   for (const file of value.files) {
     installReader(file, value, limit, bridge ? (first, last) => {
-      bridgePost('demand', { infoHash: value.infoHash, first, last, viewer }).catch(e => { if (value === torrent && $('video').readyState < 2) status(e.message) })
+      bridgePost('demand', { infoHash: value.infoHash, first, last, viewer: `${viewer}:${value.files.indexOf(file)}` }).catch(e => { if (value === torrent && $('video').readyState < 2) status(e.message) })
     } : null, fallback)
+    if (!$('#files')) continue
     const entry = videoFiles(value.files, catalogueSelection?.episodes).find(e => e.file === file)
     if (!entry) continue
     const button = document.createElement('button')
@@ -275,7 +414,7 @@ async function connect (source, selection, request) {
     if (bridge) {
       const started = await bridgePost('start', selection ? { movie: selection.movie, quality: selection.quality } : { magnet: source })
       if (request !== joinRequest) return
-      options.announce = [`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${started.tracker || '/tracker'}`]
+      options.announce = peerTrackers(trackerUrl(started.tracker || '/tracker'), selection?.private)
       // Fetch metadata before joining RTC: a bridge that connected before metadata
       // arrived may not advertise its new metadata size to an existing RTC peer.
       const deadline = Date.now() + 90000
@@ -334,11 +473,12 @@ $('#seed').onchange = async event => {
 }
 $('#stop').onclick = () => { ++joinRequest; ++catalogueRequest; joinQueue = joinQueue.catch(() => {}).then(stop) }
 $('video').onerror = () => status('Браузер не воспроизводит этот кодек или поток. Обработка тяжёлых форматов пока не реализована.')
+const formatStats = createPlayerStats()
 const statsTimer = setInterval(() => {
-  $('#stats').textContent = `WebRTC-пиры: ${torrent?.numPeers || 0}\nПриём P2P: ${Math.round((torrent?.downloadSpeed || 0) / 1024)} КиБ/с · Отдача: ${Math.round((torrent?.uploadSpeed || 0) / 1024)} КиБ/с\nРезерв HTTPS → RAM: ${(httpBytes / 1024 ** 2).toFixed(1)} МБ\nОтдано: ${((torrent?.uploaded || 0) / 1024 ** 2).toFixed(1)} МБ\nRAM-куски: ${((store?.used || 0) / 1024 ** 2).toFixed(1)} МБ`
+  $('#stats').textContent = formatStats({ video: $('video'), torrent, store, cache: viewerCache, stream: mediaStream, audioActive, httpBytes })
 }, 1000)
 if (!isSecureContext) status('Откройте по HTTPS: Service Worker недоступен на обычном HTTP-адресе домашней сети.')
-fetch('/bridge/config').then(r => r.json()).then(config => {
+backendFetch('/bridge/config').then(r => r.json()).then(config => {
   if (!config.enabled || compact || disposed) return
   $('h1').textContent = 'Torfilms · Hybrid-мост'
   $('.warning').textContent = `Мост получает данные от TCP/uTP-пиров и передаёт браузерам через WebRTC. До ${config.maxWorkers || 1} независимых раздач, кеш каждой — ${config.memoryMb} МБ. RAM браузера задаётся ниже. IP-адрес виден пирам.`
@@ -349,7 +489,7 @@ async function catalogueQuality (movie, quality) {
     const saved = await mediaJson(`/catalog/source/${movie}/${quality}`)
     if (request !== catalogueRequest) return
     catalogueSelection = { ...saved, movie, quality }
-    if (initialMovie?.activeSeason != null) catalogueSelection.episodes = (saved.episodes || []).map(e => ({ ...e, excluded: e.excluded || (e.season ?? saved.season ?? 1) !== initialMovie.activeSeason }))
+    if (initialMovie?.activeSeason != null) catalogueSelection.episodes = (saved.episodes || []).map(e => ({ ...e, excluded: e.excluded || seasonKey(e.season ?? saved.season ?? 1) !== seasonKey(initialMovie.activeSeason) }))
     $('#magnet').value = saved.magnet
     $('#join').requestSubmit()
   } catch (error) { status(error.message) }

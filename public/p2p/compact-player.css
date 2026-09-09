@@ -1,4 +1,12 @@
 .movie-player{margin-top:28px;scroll-margin-top:20px;min-width:0}
+.series-editor{width:min(1100px,94vw);max-height:90vh;overflow:auto}
+.series-editor .season-editor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.series-editor .episode-editor-row{display:grid;grid-template-columns:auto minmax(180px,2fr) minmax(110px,1fr) auto;gap:12px;align-items:center}
+.series-editor .editor-bulk{display:flex;gap:10px;flex-wrap:wrap;align-items:end;padding:12px 0}
+.series-editor details{padding:12px 0}.series-editor summary{cursor:pointer;font-weight:600}
+.series-editor input[type=checkbox]{width:auto}
+.series-editor legend{overflow-wrap:anywhere;font-size:12px}
+@media(max-width:650px){.series-editor .episode-editor-row{grid-template-columns:1fr 1fr}}
 .movie-player video{display:block;width:100%;aspect-ratio:16/9;max-height:80vh;background:#000;object-fit:contain;border-radius:8px}
 .movie-player .player-tools{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:12px 0}
 .movie-player label{display:flex;flex-direction:column;gap:5px;font-size:14px;min-width:0}

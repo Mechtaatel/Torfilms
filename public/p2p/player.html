@@ -8,8 +8,9 @@
 <form id="join" onsubmit="return false"><label>Magnet <input id="magnet" required placeholder="magnet:?xt=urn:btih:…"></label><button type="submit">Подключиться и раздавать</button></form>
 <label>Стать первым источником — выбрать небольшое видео (не больше половины лимита RAM) <input id="seed" type="file" accept="video/*"></label>
 <p>При выборе файл читается локально, а его копия хранится в RAM; на сервер файл не отправляется. Поделитесь полученной magnet-ссылкой со вторым зрителем.</p>
-<button id="stop">Остановить и очистить кеш</button><p id="status" role="status"></p><pre id="stats"></pre><div id="files"></div>
+<button id="stop">Остановить (сохранить RAM-кеш)</button><p id="status" role="status"></p><pre id="stats"></pre><div id="files"></div>
 <video controls playsinline preload="auto"></video>
+<label>Обработка контейнера <select id="processing-mode"><option value="browser">На этом устройстве · без перекодирования (экспериментально)</option><option value="bridge">На мосте · совместимость кодеков</option><option value="direct">Прямое воспроизведение MKV</option></select></label>
 <section id="audio-panel" hidden><label>Озвучка <select id="audio-track"></select></label><button id="audio-refresh" type="button">Обновить озвучки</button>
 <button id="audio-original" type="button">Исходный P2P-поток</button>
 <label>Субтитры <select id="subtitle-track"><option value="">Выключены</option></select></label><p id="subtitle-status"></p>

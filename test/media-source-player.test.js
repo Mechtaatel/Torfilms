@@ -23,6 +23,7 @@ test('native MediaSource uses full duration and requests unbuffered seeks', asyn
     const controller = streamMediaSource(video, { url: '/fixture', duration: 1427, origin: 0, position: 0, onSeek: time => { seek = time }, onError: error => { throw error } })
     await new Promise(r => setImmediate(r))
     assert.equal(media.duration, 1427)
+    assert.equal(controller.receivedBytes, 1)
     video.currentTime = 5; video.dispatchEvent(new Event('seeking')); assert.equal(seek, undefined)
     video.currentTime = 900; video.dispatchEvent(new Event('seeking')); assert.equal(seek, 900)
     controller.destroy(); assert.equal(stopped, true)
