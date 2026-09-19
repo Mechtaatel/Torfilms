@@ -365,7 +365,7 @@ async function prepare () {
   await stop()
   if (!isSecureContext || !('serviceWorker' in navigator)) throw new Error('Нужен HTTPS (на компьютере также подходит localhost). Домашний HTTP-адрес не поддерживает этот режим.')
   if (!WebTorrent.WEBRTC_SUPPORT) throw new Error('WebRTC не поддерживается этим браузером')
-  client = new WebTorrent({ dht: false, lsd: false, maxConns: 12, downloadLimit: -1, uploadLimit: rate * 1024, tracker: true })
+  client = new WebTorrent({ dht: false, lsd: false, maxConns: 12, downloadLimit: -1, uploadLimit: rate * 1024, tracker: { rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.l.google.com:1930' }] } } })
   client.on('error', error => status(error.message))
   const registration = await navigator.serviceWorker.register(new URL('./sw.min.js', import.meta.url).href, { scope: new URL('./', import.meta.url).pathname })
   const worker = registration.active || registration.installing || registration.waiting
