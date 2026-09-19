@@ -39,6 +39,8 @@ SELECT c.id, jsonb_build_object(
   )) FROM jsonb_array_elements(COALESCE(c.payload->'seasons','[]'::jsonb)) s), '[]'::jsonb),
   'sources', COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'id', s->'id', 'label', s->'label', 'season', s->'season', 'fileIndex', s->'fileIndex',
+    'publicPlayback', CASE WHEN s->'publicPlayback'->>'infoHash' ~ '^[a-f0-9]{40}$'
+      THEN jsonb_build_object('infoHash', s->'publicPlayback'->>'infoHash') ELSE NULL END,
     'episodes', COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'index', e->'index', 'title', e->'title', 'season', e->'season', 'excluded', e->'excluded'
     )) FROM jsonb_array_elements(COALESCE(s->'episodes','[]'::jsonb)) e), '[]'::jsonb)

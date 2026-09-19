@@ -14,5 +14,5 @@ test('embedded player exposes a constrained range instead of unrestricted numeri
     assert.match(source, /id="ram" type="range" min="500" max="2048" step="1" value="500"/)
   }
   const app = readFileSync(new URL('../public/p2p/app.js', import.meta.url), 'utf8')
-  assert.match(app, /async function prepare \(\) \{[\s\S]*?ramLimitBytes\(\$\('#ram'\)\.value\)[\s\S]*?await stop\(\)/)
+  assert.match(app, /async function prepare [\s\S]*?ramLimitBytes\(\$\('#ram'\)\.value\)[\s\S]*?await stop\(\)/)
 })

@@ -9,6 +9,7 @@ import { readProgress, writeProgress } from './watch-progress.js'
 import { readRamSetting, saveRamSetting } from './viewer-settings.js'
 import { RetainedRamPool } from './retained-ram.js'
 import { publicTrackers, peerTrackers } from './peer-trackers.js'
+import { publicPlaybackSource } from './playback-source.js'
 import { createPlayerStats } from './player-stats.js'
 import { startLocalRemux } from './local-remux.js'
 import { startDirectPlayback } from './direct-player.js'
@@ -356,7 +357,7 @@ async function stop () {
   if (old) await new Promise(r => old.destroy(r))
   status('Остановлено. RAM-куски сохранены до вытеснения или перезагрузки страницы.')
 }
-async function prepare () {
+async function prepare ({ publicPeer = false } = {}) {
   // Validate independently of HTML attributes, before stopping a working player.
   const limit = ramLimitBytes($('#ram').value)
   saveRamSetting($('#ram').value); viewerCache.configure(limit)
@@ -365,14 +366,16 @@ async function prepare () {
   await stop()
   if (!isSecureContext || !('serviceWorker' in navigator)) throw new Error('Нужен HTTPS (на компьютере также подходит localhost). Домашний HTTP-адрес не поддерживает этот режим.')
   if (!WebTorrent.WEBRTC_SUPPORT) throw new Error('WebRTC не поддерживается этим браузером')
-  client = new WebTorrent({ dht: false, lsd: false, maxConns: 12, downloadLimit: -1, uploadLimit: rate * 1024, tracker: { rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.l.google.com:1930' }] } } })
+  client = new WebTorrent({ dht: false, lsd: false, maxConns: 12, downloadLimit: -1, uploadLimit: rate * 1024, tracker: { rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } } })
   client.on('error', error => status(error.message))
   const registration = await navigator.serviceWorker.register(new URL('./sw.min.js', import.meta.url).href, { scope: new URL('./', import.meta.url).pathname })
   const worker = registration.active || registration.installing || registration.waiting
   if (worker.state !== 'activated') await new Promise(resolve => worker.addEventListener('statechange', () => { if (worker.state === 'activated') resolve() }))
   client.createServer({ controller: registration })
   bridge = false
-  try { bridge = (await (await backendFetch('/bridge/config')).json()).enabled === true } catch {}
+  if (!publicPeer) {
+    try { bridge = (await (await backendFetch('/bridge/config', { signal: AbortSignal.timeout(3000) })).json()).enabled === true } catch {}
+  }
   if (bridge) status(compact ? 'Подключаю раздачу…' : 'Hybrid-мост включён: его RAM-кеш находится на компьютере-сервере, ваш кеш — в этом браузере.')
   const announce = bridge ? [trackerUrl(), ...trackers] : trackers
   return { limit, options: { announce, store: RamStore, storeCacheSlots: 0, deselect: true, storeOpts: { limit, pool: viewerCache, onStore: value => { store = value } } } }
@@ -408,7 +411,7 @@ async function connect (source, selection, request) {
   joining = true
   $('#seed').disabled = true
   try {
-    const { limit, options } = await prepare()
+    const { limit, options } = await prepare({ publicPeer: !!selection?.publicPlayback && $('#processing-mode')?.value !== 'bridge' })
     if (request !== joinRequest) return
     let metadata = selection?.torrentBase64
     if (bridge) {
@@ -428,7 +431,7 @@ async function connect (source, selection, request) {
       }
     }
     const id = generation
-    status(compact ? 'Загружаю видео…' : 'Ищу WebRTC-пиров. Если их нет, обычные torrent-пиры не смогут передать видео браузеру.')
+    status(bridge ? 'Загружаю видео…' : 'Ищу WebRTC-пиров через WSS. Ожидаю соединение и метаданные раздачи…')
     const input = metadata ? Uint8Array.from(atob(metadata), c => c.charCodeAt(0)) : source
     const value = client.add(input, options, value => {
       if (id !== generation || request !== joinRequest) return
@@ -486,7 +489,8 @@ backendFetch('/bridge/config').then(r => r.json()).then(config => {
 async function catalogueQuality (movie, quality) {
   const request = ++catalogueRequest
   try {
-    const saved = await mediaJson(`/catalog/source/${movie}/${quality}`)
+    const publicSource = publicPlaybackSource(initialMovie?.sources.find(s => s.id === quality))
+    const saved = publicSource || await mediaJson(`/catalog/source/${movie}/${quality}`)
     if (request !== catalogueRequest) return
     catalogueSelection = { ...saved, movie, quality }
     if (initialMovie?.activeSeason != null) catalogueSelection.episodes = (saved.episodes || []).map(e => ({ ...e, excluded: e.excluded || seasonKey(e.season ?? saved.season ?? 1) !== seasonKey(initialMovie.activeSeason) }))
