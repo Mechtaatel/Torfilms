@@ -5,7 +5,7 @@ import { openSeriesEditor } from './series-editor.js'
 import config from './runtime-config.js'
 import { createCatalogReader } from './catalog-reader.js'
 const viewerOnly = config.viewerOnly !== false
-const accounts = viewerOnly ? null : await import('./accounts-ui.js')
+const accounts = await import('./accounts-ui.js')
 const canModerate = () => accounts?.canModerate() || false
 const $ = s => document.querySelector(s)
 let movies = [], category = '', editing = null
@@ -13,7 +13,6 @@ let activePlayer = null, playerRequest = 0
 const accountUI = accounts?.mountAccounts()
 const readMovies = createCatalogReader(config, route => api(route, undefined, true))
 async function submitDraft (draft, kind = 'movie') {
-  if (viewerOnly) throw new Error('Этот сайт предназначен только для просмотра')
   if (!accounts.currentUser) { accountUI.open(); throw new Error('Войдите, чтобы отправить предложение') }
   if (canModerate()) return api('/catalog/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) })
   await api('/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, draft }) })
@@ -85,7 +84,8 @@ function render (options = {}) {
       } catch (e) { $('#notice').textContent = e.message }
     }
     actions.append(play)
-    if (!viewerOnly) actions.append(edit, seriesEdit)
+    actions.append(edit)
+    if (!viewerOnly) actions.append(seriesEdit)
     body.append(node('p', movie.description || 'Описание пока не добавлено.', 'description'), actions)
     detail.append(cover({ ...movie, poster: season?.poster || movie.poster }), body); content.append(detail)
     if (seasons.length) {
@@ -149,9 +149,8 @@ function addSeason (season = {}) {
 }
 const fields = ['id', 'title', 'year', 'kind', 'genre', 'description', 'poster', 'kinopoiskId', 'ageRating', 'endDate']
 function openEditor (movie) {
-  if (viewerOnly) return
   if (!accounts.currentUser) { accountUI.open(); return }
-  editing = movie || null; form.reset(); $('#sources').replaceChildren(); $('#form-error').textContent = ''; $('#editor-title').textContent = movie ? 'Редактировать фильм' : 'Добавить фильм'
+  editing = movie || null; form.reset(); $('#sources').replaceChildren(); $('#form-error').textContent = ''; $('#editor-title').textContent = canModerate() ? (movie ? 'Редактировать фильм' : 'Добавить фильм') : (movie ? 'Предложить изменение' : 'Предложить фильм')
   requestKind.hidden = canModerate(); requestKind.value = movie ? 'description' : 'movie'
   $('#save').textContent = canModerate() ? 'Сохранить карточку' : 'Отправить заявку'
   for (const key of fields) field(key).value = key === 'poster' && movie?.poster?.startsWith('data:') ? '' : movie?.[key] || (key === 'kind' ? 'Фильм' : '')
@@ -184,12 +183,12 @@ form.onsubmit = async event => {
   } catch (error) { $('#form-error').textContent = error.message || 'Не удалось прочитать файл' } finally { $('#save').disabled = false }
 }
 $('#add').onclick = () => openEditor(); $('#add-source').onclick = () => addSource(); $('#close').onclick = () => $('#editor').close()
-$('#add').hidden = viewerOnly
+$('#add').textContent = canModerate() ? '+ Добавить фильм' : '+ Предложить фильм'
 $('#add-season').onclick = () => addSeason()
 for (const selector of ['#tag-filter', '#sort']) $(selector).onchange = () => { history.pushState({}, '', siteRoot); render() }
 $('#search').oninput = () => { history.pushState({}, '', siteRoot); render() }
 document.querySelectorAll('[data-kind]').forEach(button => { button.onclick = () => { category = button.dataset.kind; document.querySelectorAll('[data-kind]').forEach(b => b.classList.toggle('active', b === button)); history.pushState({}, '', siteRoot); render() } })
 addEventListener('popstate', render)
-document.addEventListener('torfilms-auth', () => { $('#add').textContent = canModerate() ? '+ Добавить фильм' : '+ Предложить фильм'; if (movies.length) render() })
+document.addEventListener('torfilms-auth', () => { $('#add').textContent = canModerate() ? '+ Добавить фильм' : '+ Предложить фильм' })
 document.addEventListener('torfilms-catalog-changed', async () => { movies = await api('/catalog/movies'); render() })
 try { movies = await api('/catalog/movies'); for (const tag of [...new Set(movies.flatMap(tagsOf))].sort((a, b) => a.localeCompare(b, 'ru'))) { const option = node('option', tag); option.value = tag; $('#tag-filter').append(option) }; $('#tag-filter').value = new URLSearchParams(location.search).get('tag') || ''; render() } catch (error) { $('#notice').textContent = `Не удалось загрузить библиотеку: ${error.message}` }

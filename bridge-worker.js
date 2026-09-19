@@ -89,7 +89,13 @@ const server = http.createServer(async (req, res) => {
         }
         if (!torrent) {
           activeHash = hash
-          torrent = client.add(saved?.torrentBase64 ? Buffer.from(saved.torrentBase64, 'base64') : data.magnet, { announce: [trackerUrl], deselect: true, store: RamStore, storeCacheSlots: 0, storeOpts: { limit, onStore: s => { store = s } } })
+          const torrentInput = saved?.torrentBase64 ? Buffer.from(saved.torrentBase64, 'base64') : data.magnet
+          // Keep the torrent's public/private HTTP and UDP trackers so this
+          // native WebTorrent node can discover qBittorrent TCP/uTP peers. The
+          // local WebSocket tracker is an additional path for browser WebRTC.
+          const metadata = await parseTorrent(torrentInput)
+          const announce = [...new Set([...(metadata.announce || []), trackerUrl])]
+          torrent = client.add(torrentInput, { announce, deselect: true, store: RamStore, storeCacheSlots: 0, storeOpts: { limit, onStore: s => { store = s } } })
           torrent.on('warning', e => { warning = e.message })
           torrent.on('error', e => { warning = e.message })
           torrent.on('ready', select)

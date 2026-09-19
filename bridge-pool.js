@@ -17,7 +17,7 @@ const maximum = Number(process.env.TORFILMS_BRIDGE_WORKERS || 4)
 if (!Number.isInteger(maximum) || maximum < 1 || maximum > 8 || !Number.isFinite(ram) || ram < 32 || ram > 2048) throw new Error('Invalid worker / RAM limit')
 const root = fileURLToPath(new URL('./public/p2p/', import.meta.url))
 const library = catalog(process.env.TORFILMS_CATALOG_DIR || fileURLToPath(new URL('./data/', import.meta.url)))
-const identity = accounts(accountsStore(process.env.TORFILMS_CATALOG_DIR || fileURLToPath(new URL('./data/', import.meta.url))), library)
+const identity = accounts(accountsStore(process.env.TORFILMS_CATALOG_DIR || fileURLToPath(new URL('./data/', import.meta.url))), library, { publicOnly: process.env.TORFILMS_ADMIN_ENABLED !== '1' })
 const workers = new Map()
 const recovered = new Set()
 function getWorker (hash) {

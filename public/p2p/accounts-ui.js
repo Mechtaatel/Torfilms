@@ -1,6 +1,7 @@
 import { backendFetch } from './backend.js'
+import config from './runtime-config.js'
 export let currentUser = null
-export const canModerate = () => ['moderator', 'admin'].includes(currentUser?.role)
+export const canModerate = () => config.viewerOnly === false && ['moderator', 'admin'].includes(currentUser?.role)
 const element = (tag, text) => { const e = document.createElement(tag); if (text != null) e.textContent = text; return e }
 async function api (route, data) {
   const response = await backendFetch(route, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
@@ -64,7 +65,7 @@ export function mountAccounts () {
       const queue = element('button', canModerate() ? 'Рассмотреть заявки' : 'Мои заявки'); queue.onclick = () => requests().catch(showError)
       const logout = element('button', 'Выйти'); logout.onclick = async () => { try { await api('/auth/logout', {}) } catch {} sessionStorage.removeItem('torfilms-session'); currentUser = null; changed(); show() }
       content.append(queue, logout)
-      if (currentUser.role === 'admin') {
+      if (canModerate() && currentUser.role === 'admin') {
         const admin = element('button', 'Пользователи и права'); admin.onclick = () => users().catch(showError); content.append(admin)
         const audit = element('button', 'Журнал действий'); audit.onclick = async () => { try { const records = await api('/admin/audit'); content.replaceChildren(element('h2', 'Журнал действий'), element('pre', JSON.stringify(records, null, 2))) } catch (e) { showError(e) } }; content.append(audit)
       }

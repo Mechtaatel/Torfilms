@@ -8,7 +8,7 @@ export function backendUrl (route) {
 }
 export function backendFetch (route, options = {}) {
   const headers = new Headers(options.headers)
-  if (config.viewerOnly === false && /^\/(auth|requests|admin|catalog)(\/|$)/.test(route)) {
+  if (/^\/(auth|requests)(\/|$)/.test(route) || (config.viewerOnly === false && /^\/(admin|catalog)(\/|$)/.test(route))) {
     try { const token = sessionStorage.getItem('torfilms-session'); if (token) headers.set('Authorization', `Bearer ${token}`) } catch {}
   }
   return fetch(backendUrl(route), { ...options, headers })

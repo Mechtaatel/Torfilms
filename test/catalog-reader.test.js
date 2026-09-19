@@ -24,9 +24,10 @@ test('Neon errors do not silently switch to backend and credentials in URL are r
 test('Viewer backend denies management even without Origin, and still allows streaming', () => {
   const req = { method: 'POST', headers: { host: 'localhost' }, url: '' }
   const res = { writeHead (code) { this.status = code }, end () {} }
-  for (const route of ['/catalog/movies', '/admin/users', '/requests/a/review', '/auth/login']) {
+  for (const route of ['/catalog/movies', '/admin/users', '/requests/a/review', '/auth/unknown']) {
     req.url = route; assert.equal(backendAccess(req, res, {}), false); assert.equal(res.status, 403)
   }
   req.url = '/bridge/start'; assert.equal(backendAccess(req, res, {}), true)
+  for (const route of ['/auth/register', '/auth/login', '/auth/logout', '/requests']) { req.url = route; assert.equal(backendAccess(req, res, {}), true) }
   req.url = '/catalog/movies'; req.method = 'GET'; assert.equal(backendAccess(req, res, {}), true)
 })
